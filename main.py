@@ -4,6 +4,7 @@ from llm_handler import LLMHandler
 from evaluator import StanceEvaluator
 import httpx
 import asyncio
+import time
 
 # Fast-path gate thresholds (see general_reaction_gate_konzept.md, Task 1.3).
 # NOTE: 0.6 is an interim placeholder, NOT a tuned production value. The
@@ -13,6 +14,10 @@ GR_SCORE_THRESHOLD = 0.6
 FAST_PATH_MAX_WORDS = 5
 FAST_PATH_STANCE = "in favor"
 FAST_PATH_EXPLANATION = "Allgemeine positive Reaktion auf den gesamten Beitrag"
+
+# DEBUG / TEMPORARY — for manual test runs only. Remove before any full
+# production run: this caps the loop at the first few rows instead of all 155.
+DEBUG_ROW_LIMIT = 3
 
 
 def should_fast_path(
@@ -47,14 +52,16 @@ def should_fast_path(
 async def main():
     """Run stance detection over the gold-label dataset.
 
-    Loads the data, applies the fast-path gate per row, and either emits the
-    canned fast-path result or calls the LLM, then prints a summary of how many
-    rows took each path.
+    Loads the data (capped at DEBUG_ROW_LIMIT for manual test runs), applies the
+    fast-path gate per row, and either emits the canned fast-path result or calls
+    the LLM, then prints a summary of how many rows took each path along with
+    per-iteration and total loop timing.
     """
     stance_detector = StanceDetector()
     llm_handler = LLMHandler()
 
     data = stance_detector.load_data()
+    data = data[:DEBUG_ROW_LIMIT]  # DEBUG / TEMPORARY — see DEBUG_ROW_LIMIT above
     prompt_config = stance_detector.load_prompt_config("./prompts/config.json", "base")
 
     base_url = "http://10.200.160.182:5555/v1"
@@ -69,7 +76,9 @@ async def main():
 
     semaphore = asyncio.Semaphore(1)
     async with httpx.AsyncClient() as client:
+        loop_start = time.time()
         for index, item in enumerate(data):
+            iter_start = time.time()
             # Safe defaults so a malformed row fails the gate and routes to the
             # LLM instead of raising.
             comment_text = item.get("comment_text", "")
@@ -83,8 +92,9 @@ async def main():
                 }
                 predictions[item["row_index"]] = result["stance"]
                 fast_path_count += 1
+                iter_elapsed = time.time() - iter_start
                 print(
-                    f"[{index}] FAST-PATH  stance={FAST_PATH_STANCE}  (gr_score={gr_score})"
+                    f"[{index}] FAST-PATH  stance={FAST_PATH_STANCE}  (gr_score={gr_score})  (elapsed={iter_elapsed:.2f}s)"
                 )
             else:
                 system, messages = stance_detector.build_messages(
@@ -103,14 +113,19 @@ async def main():
                     result.get("stance") if result else None
                 )
                 llm_count += 1
+                iter_elapsed = time.time() - iter_start
                 print(
-                    f"[{index}] LLM        stance={result.get('stance') if result else None}"
+                    f"[{index}] LLM        stance={result.get('stance') if result else None}  (elapsed={iter_elapsed:.2f}s)"
                 )
 
+    # Measured after the `async with` exits so the HTTP client's connection
+    # teardown is included in the total.
+    total_elapsed = time.time() - loop_start
     print(
         f"Fast-pathed: {fast_path_count}  |  LLM calls: {llm_count}  "
         f"|  total: {fast_path_count + llm_count}"
     )
+    print(f"Total loop time: {total_elapsed:.2f}s")
 
     evaluator = StanceEvaluator()
     report = evaluator.evaluate(predictions)
