@@ -10,7 +10,7 @@ import json
 import httpx
 import pytest
 
-from llm_handler import LLMHandler
+from llm_handler import LLMHandler, normalize_stance_label
 
 
 class FakeResponse:
@@ -117,3 +117,88 @@ def test_json_decode_error_returns_none():
     result = _call(client)
 
     assert result is None
+
+
+# ── normalize_stance_label unit tests ──────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        # All 3 canonical mappings.
+        ("IN FAVOR", "in favor"),
+        ("AGAINST", "ablehnung"),
+        ("NEUTRAL", "neutral"),
+        # Case variations.
+        ("neutral", "neutral"),
+        ("Neutral", "neutral"),
+        ("NeUtRaL", "neutral"),
+        ("in favor", "in favor"),
+        ("In Favor", "in favor"),
+        ("against", "ablehnung"),
+        # Whitespace robustness.
+        (" NEUTRAL ", "neutral"),
+        ("  in favor", "in favor"),
+        ("AGAINST\n", "ablehnung"),
+    ],
+)
+def test_normalize_stance_label_recognized(raw, expected):
+    assert normalize_stance_label(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["MAYBE", "support", "oppose"],
+)
+def test_normalize_stance_label_passthrough_unchanged(raw):
+    # Unrecognized values are returned unchanged, original casing preserved.
+    assert normalize_stance_label(raw) == raw
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [None, "", 123],
+)
+def test_normalize_stance_label_safety(raw):
+    # Non-string and empty inputs must pass through without raising.
+    assert normalize_stance_label(raw) == raw
+
+
+# ── call_model normalization regression tests ──────────────────────
+
+
+def test_call_model_normalizes_in_favor():
+    content = '{"stance": "IN FAVOR", "explanation": "x"}'
+    client = CapturingClient(response=FakeResponse(content))
+
+    result = _call(client)
+
+    assert result == {"stance": "in favor", "explanation": "x"}
+
+
+def test_call_model_normalizes_neutral_with_whitespace_and_keeps_explanation():
+    content = '{"stance": " neutral ", "explanation": "y"}'
+    client = CapturingClient(response=FakeResponse(content))
+
+    result = _call(client)
+
+    assert result["stance"] == "neutral"
+    assert result["explanation"] == "y"
+
+
+def test_call_model_normalizes_against_to_ablehnung():
+    content = '{"stance": "AGAINST", "explanation": "z"}'
+    client = CapturingClient(response=FakeResponse(content))
+
+    result = _call(client)
+
+    assert result["stance"] == "ablehnung"
+
+
+def test_call_model_unrecognized_stance_passes_through():
+    content = '{"stance": "GARBLED", "explanation": "w"}'
+    client = CapturingClient(response=FakeResponse(content))
+
+    result = _call(client)
+
+    assert result["stance"] == "GARBLED"

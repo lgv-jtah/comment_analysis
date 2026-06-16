@@ -10,6 +10,38 @@ MAX_TOKENS = 8000
 THINKING_BUDGET = 6000
 RATE_LIMIT_DELAY = 0.5
 
+STANCE_LABEL_MAP = {
+    "IN FAVOR": "in favor",
+    "AGAINST": "ablehnung",
+    "NEUTRAL": "neutral",
+}
+
+
+def normalize_stance_label(raw):
+    """Map the LLM's stance vocabulary to the gold-label convention.
+
+    The model is prompted to answer with "IN FAVOR" | "AGAINST" | "NEUTRAL",
+    but gold_stance in gold_labels_corrected.json uses "in favor" | "ablehnung"
+    | "neutral". Note "AGAINST" maps to "ablehnung" (German for "rejection") --
+    this is a deliberate translation in the gold vocabulary, not a typo or a
+    simple lowercasing. Matching is case-insensitive and whitespace-trimmed since LLM
+    output casing/spacing isn't perfectly deterministic. Anything that doesn't
+    match one of the three known categories is returned unchanged (not coerced
+    or guessed), so anomalies stay visible instead of being silently masked.
+
+    Args:
+        raw: The stance value as returned by the model. May be any type;
+            non-string values are returned unchanged.
+
+    Returns:
+        The canonical gold-vocabulary label if recognized, otherwise the
+        original value unchanged.
+    """
+    if not isinstance(raw, str):
+        return raw
+    return STANCE_LABEL_MAP.get(raw.strip().upper(), raw)
+
+
 class Stance(BaseModel):
     """Schema for a single stance-detection result returned by the model."""
 
@@ -122,7 +154,12 @@ class LLMHandler:
                 if start >= 0 and end > start:
                     clean = clean[start:end]
 
-                return json.loads(clean)
+                parsed = json.loads(clean)
+                # Only "stance" is remapped to the gold vocabulary; "explanation"
+                # is free-form natural language and must be returned verbatim.
+                if isinstance(parsed, dict) and "stance" in parsed:
+                    parsed["stance"] = normalize_stance_label(parsed["stance"])
+                return parsed
 
             except httpx.HTTPStatusError as e:
                 print(f"  HTTP error: {e.response.status_code} - {e.response.text[:200]}")
