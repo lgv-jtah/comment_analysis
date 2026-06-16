@@ -1,6 +1,7 @@
 """Stance-detection entry point with the general-reaction fast-path gate."""
 from stance_detector import StanceDetector
 from llm_handler import LLMHandler
+from evaluator import StanceEvaluator
 import httpx
 import asyncio
 
@@ -61,6 +62,10 @@ async def main():
 
     fast_path_count = 0
     llm_count = 0
+    # Key predictions by item["row_index"], NOT the loop's enumerate index:
+    # row_index is the stable gold identifier and differs from list position
+    # for many rows, so the evaluator must match on it.
+    predictions: dict[int, str | None] = {}
 
     semaphore = asyncio.Semaphore(1)
     async with httpx.AsyncClient() as client:
@@ -76,6 +81,7 @@ async def main():
                     "stance": FAST_PATH_STANCE,
                     "explanation": FAST_PATH_EXPLANATION,
                 }
+                predictions[item["row_index"]] = result["stance"]
                 fast_path_count += 1
                 print(
                     f"[{index}] FAST-PATH  stance={FAST_PATH_STANCE}  (gr_score={gr_score})"
@@ -93,6 +99,9 @@ async def main():
                     semaphore=semaphore,
                     enable_thinking=True,
                 )
+                predictions[item["row_index"]] = (
+                    result.get("stance") if result else None
+                )
                 llm_count += 1
                 print(
                     f"[{index}] LLM        stance={result.get('stance') if result else None}"
@@ -102,6 +111,10 @@ async def main():
         f"Fast-pathed: {fast_path_count}  |  LLM calls: {llm_count}  "
         f"|  total: {fast_path_count + llm_count}"
     )
+
+    evaluator = StanceEvaluator()
+    report = evaluator.evaluate(predictions)
+    print(evaluator.format_report(report))
 
 
 if __name__ == "__main__":
