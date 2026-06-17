@@ -1,13 +1,39 @@
+"""Stance detection with an LLM, including the general-reaction Ensemble Path."""
 import json
 import sys
 from string import Template
 from collections import Counter, defaultdict
 from pathlib import Path
-"""Runs a stance detector"""
+
+# German hint injected into the user prompt on the Ensemble Path (Pfad 2). The
+# upstream general-reaction classifier flagged the comment as a confident
+# positive reaction; we surface that signal to the LLM via $score while still
+# asking it to classify on the content-level relation to the key message.
+GR_HINT_TEMPLATE = Template(
+    "Hinweis: Dieser Kommentar wurde als allgemeine positive Reaktion auf den "
+    "gesamten Beitrag erkannt (Score: $score). Berücksichtige dies bei der "
+    "Bewertung, aber klassifiziere trotzdem anhand des inhaltlichen Bezugs zur "
+    "spezifischen Kernaussage."
+)
+
+
 class StanceDetector:
     "Stance Detection with an LLM"
     def __init__(self):
         pass
+
+    @staticmethod
+    def format_gr_hint(score: float) -> str:
+        """Render the German general-reaction hint for a given confidence score.
+
+        Args:
+            score: General-reaction confidence in [0.0, 1.0]; formatted to two
+                decimals.
+
+        Returns:
+            The hint text with $score substituted by the formatted score.
+        """
+        return GR_HINT_TEMPLATE.substitute(score=f"{score:.2f}")
     def detect_stance(self, text: str, target: str):
         return None
 
@@ -67,10 +93,18 @@ class StanceDetector:
                 "format": "template",  # string.Template with $variables
             }
 
-    def build_messages(self, prompt_config: dict, item: dict) -> tuple[str, list[dict]]:
+    def build_messages(
+        self, prompt_config: dict, item: dict, gr_hint: str | None = None
+    ) -> tuple[str, list[dict]]:
         """Build system prompt and messages for a single stance evaluation.
 
         Supports both string.Template ($variable) and str.format_map ({variable}).
+
+        Args:
+            prompt_config: Resolved prompt config from load_prompt_config.
+            item: A single gold-label row supplying template variables.
+            gr_hint: Optional Ensemble-Path (Pfad 2) hint appended to the user
+                content; when None the user content is unchanged.
         """
         system = prompt_config["system"]
 
@@ -97,6 +131,9 @@ class StanceDetector:
             user_content = prompt_config["user_template"].format_map(
                 defaultdict(str, template_vars)
             )
+
+        if gr_hint is not None:
+            user_content = f"{user_content}\n\n{gr_hint}"
 
         messages = [{"role": "user", "content": user_content}]
         return system, messages

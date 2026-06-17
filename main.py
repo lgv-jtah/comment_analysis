@@ -17,7 +17,7 @@ FAST_PATH_EXPLANATION = "Allgemeine positive Reaktion auf den gesamten Beitrag"
 
 # DEBUG / TEMPORARY — for manual test runs only. Remove before any full
 # production run: this caps the loop at the first few rows instead of all 155.
-DEBUG_ROW_LIMIT = 3
+DEBUG_ROW_LIMIT = 10
 
 
 def should_fast_path(
@@ -49,6 +49,38 @@ def should_fast_path(
     )
 
 
+def should_ensemble_path(
+    general_reaction_label: str, general_reaction_score: float, comment_text: str
+) -> bool:
+    """Decide whether a comment takes the ensemble path.
+
+    Implements "Pfad 2 — Ensemble Path" from general_reaction_gate_konzept.md:
+    a *longer* comment that the upstream general-reaction classifier
+    confidently labelled as a positive reaction still gets a dedicated
+    stance-detection LLM call, but with the general-reaction signal injected as
+    a hint. This is the complement of the fast path on word count: the fast path
+    takes short confident-positive comments, the ensemble path takes the long
+    ones.
+
+    Args:
+        general_reaction_label: Label from the general-reaction classifier;
+            only "ja" (yes, a general reaction) can qualify.
+        general_reaction_score: Confidence of that label, in [0.0, 1.0].
+        comment_text: The raw comment text; word count gates long comments.
+
+    Returns:
+        True if the comment qualifies for the ensemble path, False otherwise.
+    """
+    # Score uses strict `>` (mirrors the fast path), while word count uses
+    # strict `>` here so the fast path (`<=`) and ensemble path partition the
+    # confident-positive comments with no overlap.
+    return (
+        general_reaction_label == "ja"
+        and general_reaction_score > GR_SCORE_THRESHOLD
+        and len(comment_text.split()) > FAST_PATH_MAX_WORDS
+    )
+
+
 async def main():
     """Run stance detection over the gold-label dataset.
 
@@ -68,6 +100,7 @@ async def main():
     model_name = "Qwen/Qwen3.5-27B-FP8"
 
     fast_path_count = 0
+    ensemble_count = 0
     llm_count = 0
     # Key predictions by item["row_index"], NOT the loop's enumerate index:
     # row_index is the stable gold identifier and differs from list position
@@ -96,6 +129,30 @@ async def main():
                 print(
                     f"[{index}] FAST-PATH  stance={FAST_PATH_STANCE}  (gr_score={gr_score})  (elapsed={iter_elapsed:.2f}s)"
                 )
+            elif should_ensemble_path(gr_label, gr_score, comment_text):
+                # Pfad 2 — Ensemble Path: still call the LLM, but inject the
+                # general-reaction signal as a German hint on the user prompt.
+                hint = stance_detector.format_gr_hint(gr_score)
+                system, messages = stance_detector.build_messages(
+                    prompt_config=prompt_config, item=item, gr_hint=hint
+                )
+                result = await llm_handler.call_model(
+                    client=client,
+                    base_url=base_url,
+                    model_name=model_name,
+                    system=system,
+                    messages=messages,
+                    semaphore=semaphore,
+                    enable_thinking=True,
+                )
+                predictions[item["row_index"]] = (
+                    result.get("stance") if result else None
+                )
+                ensemble_count += 1
+                iter_elapsed = time.time() - iter_start
+                print(
+                    f"[{index}] ENSEMBLE   stance={result.get('stance') if result else None}  (gr_score={gr_score})  (elapsed={iter_elapsed:.2f}s)"
+                )
             else:
                 system, messages = stance_detector.build_messages(
                     prompt_config=prompt_config, item=item
@@ -122,8 +179,9 @@ async def main():
     # teardown is included in the total.
     total_elapsed = time.time() - loop_start
     print(
-        f"Fast-pathed: {fast_path_count}  |  LLM calls: {llm_count}  "
-        f"|  total: {fast_path_count + llm_count}"
+        f"Fast-pathed: {fast_path_count}  |  ensemble: {ensemble_count}  "
+        f"|  LLM calls: {llm_count}  "
+        f"|  total: {fast_path_count + ensemble_count + llm_count}"
     )
     print(f"Total loop time: {total_elapsed:.2f}s")
 

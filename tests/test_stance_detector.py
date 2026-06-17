@@ -75,3 +75,58 @@ def test_load_data_no_missing(detector, tmp_path, monkeypatch, capsys):
 
     out = capsys.readouterr().out
     assert "missing/None: 0" in out
+
+
+# --- General-reaction hint (format_gr_hint) tests ---
+
+_HINT_PREFIX = "Hinweis: Dieser Kommentar wurde als allgemeine positive Reaktion"
+
+
+def test_format_gr_hint_two_decimals():
+    hint = StanceDetector.format_gr_hint(0.87)
+    assert "Score: 0.87" in hint
+    assert _HINT_PREFIX in hint
+
+
+def test_format_gr_hint_rounds():
+    hint = StanceDetector.format_gr_hint(0.7417)
+    assert "Score: 0.74" in hint
+
+
+# --- build_messages hint-injection tests ---
+
+_TEMPLATE_CONFIG = {
+    "system": "system prompt",
+    "user_template": "Kommentar: $comment_text",
+    "format": "template",
+}
+_FORMAT_MAP_CONFIG = {
+    "system": "system prompt",
+    "user_template": "Kommentar: {comment_text}",
+}
+_ITEM = {"comment_text": "Das ist ein Kommentar"}
+
+
+def test_build_messages_without_hint_unchanged(detector):
+    _, messages = detector.build_messages(_TEMPLATE_CONFIG, _ITEM)
+    content = messages[0]["content"]
+    assert content == "Kommentar: Das ist ein Kommentar"
+    assert "Hinweis:" not in content
+
+
+def test_build_messages_appends_hint(detector):
+    hint = detector.format_gr_hint(0.85)
+    _, messages = detector.build_messages(_TEMPLATE_CONFIG, _ITEM, gr_hint=hint)
+    content = messages[0]["content"]
+    assert "Kommentar: Das ist ein Kommentar" in content
+    assert _HINT_PREFIX in content
+    assert "Score: 0.85" in content
+
+
+def test_build_messages_hint_with_format_map_branch(detector):
+    hint = detector.format_gr_hint(0.85)
+    _, messages = detector.build_messages(_FORMAT_MAP_CONFIG, _ITEM, gr_hint=hint)
+    content = messages[0]["content"]
+    assert "Kommentar: Das ist ein Kommentar" in content
+    assert _HINT_PREFIX in content
+    assert "Score: 0.85" in content
