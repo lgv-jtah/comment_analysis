@@ -11,7 +11,10 @@ denominator is 0. ``accuracy`` is likewise ``0.0`` when no rows were evaluated.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 
 
 @dataclass
@@ -35,6 +38,165 @@ class EvaluationReport:
     evaluated_rows: int
     skipped_rows: int
     labels: list[str]
+
+
+@dataclass
+class RunMetadata:
+    """Metadata describing a single stance-detection run.
+
+    Attributes:
+        model_name: Name of the model used for LLM calls.
+        base_url: Base URL of the model server.
+        prompt_key: Key identifying the prompt configuration used.
+        fast_path_count: Number of rows routed through the fast path.
+        ensemble_count: Number of rows routed through the ensemble path.
+        llm_count: Number of rows routed through a plain LLM call.
+        total_elapsed: Total wall-clock time for the run, in seconds.
+        notes: Optional free-form notes about the run.
+    """
+
+    model_name: str
+    base_url: str
+    prompt_key: str
+    fast_path_count: int
+    ensemble_count: int
+    llm_count: int
+    total_elapsed: float
+    notes: str | None = None
+
+
+def format_markdown_report(
+    report: EvaluationReport, metadata: RunMetadata, timestamp: datetime
+) -> str:
+    """Render an evaluation report and run metadata as a markdown document.
+
+    Emits up to six sections: the header, the run-metadata table, the overall
+    metrics, the per-class metrics table, the confusion matrix, and an optional
+    notes section (rendered only when ``metadata.notes`` is non-empty). When no
+    rows were evaluated the confusion matrix falls back to ``_No evaluated rows._``.
+
+    Args:
+        report: The evaluation results to render.
+        metadata: Run metadata describing model, routing counts, and timing.
+        timestamp: The generation time stamped into the header.
+
+    Returns:
+        A markdown string ending with a trailing newline.
+    """
+    stamp = timestamp.strftime("%Y-%m-%dT%H%M%SZ")
+    total_routed = (
+        metadata.fast_path_count + metadata.ensemble_count + metadata.llm_count
+    )
+
+    lines: list[str] = []
+    lines.append("# Stance Evaluation Report")
+    lines.append("")
+    lines.append(f"Generated: {stamp}")
+
+    # Run metadata table.
+    lines.append("")
+    lines.append("## Run metadata")
+    lines.append("")
+    lines.append("| Field | Value |")
+    lines.append("| --- | --- |")
+    lines.append(f"| Model | {metadata.model_name} |")
+    lines.append(f"| Base URL | {metadata.base_url} |")
+    lines.append(f"| Prompt key | {metadata.prompt_key} |")
+    lines.append(f"| Fast-path count | {metadata.fast_path_count} |")
+    lines.append(f"| Ensemble count | {metadata.ensemble_count} |")
+    lines.append(f"| LLM calls | {metadata.llm_count} |")
+    lines.append(f"| Total routed | {total_routed} |")
+    lines.append(f"| Total elapsed | {metadata.total_elapsed:.2f}s |")
+
+    # Overall metrics.
+    lines.append("")
+    lines.append("## Overall")
+    lines.append("")
+    lines.append(f"- Accuracy: {report.accuracy:.4f}")
+    lines.append(f"- Evaluated rows: {report.evaluated_rows}")
+    lines.append(f"- Skipped rows: {report.skipped_rows}")
+    lines.append(f"- Total rows: {report.total_rows}")
+
+    # Per-class metrics table.
+    lines.append("")
+    lines.append("## Per-class metrics")
+    lines.append("")
+    lines.append("| label | precision | recall | f1 | support |")
+    lines.append("| --- | --- | --- | --- | --- |")
+    for label in report.labels:
+        metrics = report.per_class[label]
+        lines.append(
+            f"| {label} "
+            f"| {metrics['precision']:.4f} "
+            f"| {metrics['recall']:.4f} "
+            f"| {metrics['f1']:.4f} "
+            f"| {int(metrics['support'])} |"
+        )
+
+    # Confusion matrix table.
+    lines.append("")
+    lines.append("## Confusion matrix (rows = gold, cols = predicted)")
+    lines.append("")
+    columns = sorted(
+        {col for row in report.confusion_matrix.values() for col in row}
+    )
+    if not report.labels:
+        lines.append("_No evaluated rows._")
+    else:
+        header = "| gold \\ pred | " + " | ".join(columns) + " |"
+        lines.append(header)
+        lines.append("| --- |" + " --- |" * len(columns))
+        for gold in report.labels:
+            row = report.confusion_matrix.get(gold, {})
+            cells = " | ".join(str(row.get(col, 0)) for col in columns)
+            lines.append(f"| {gold} | {cells} |")
+
+    # Optional notes section.
+    if isinstance(metadata.notes, str) and metadata.notes:
+        lines.append("")
+        lines.append("## Notes")
+        lines.append("")
+        lines.append(metadata.notes)
+
+    return "\n".join(lines) + "\n"
+
+
+def write_markdown_report(
+    report: EvaluationReport,
+    metadata: RunMetadata,
+    output_dir: str = "reports",
+    timestamp: datetime | None = None,
+) -> Path:
+    """Write a markdown evaluation report to disk without overwriting.
+
+    Args:
+        report: The evaluation results to render.
+        metadata: Run metadata; its ``prompt_key`` drives the filename slug.
+        output_dir: Directory to write into; created if absent.
+        timestamp: Generation time; defaults to the current UTC time.
+
+    Returns:
+        The :class:`Path` actually written.
+    """
+    if timestamp is None:
+        timestamp = datetime.now(timezone.utc)
+
+    slug = re.sub(r"[^a-z0-9]+", "_", metadata.prompt_key.lower()).strip("_") or "run"
+    stamp = timestamp.strftime("%Y-%m-%dT%H%M%SZ")
+
+    directory = Path(output_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+
+    path = directory / f"{stamp}_{slug}.md"
+    # No-overwrite: append -1, -2, ... before the suffix until a free path.
+    counter = 1
+    while path.exists():
+        path = directory / f"{stamp}_{slug}-{counter}.md"
+        counter += 1
+
+    content = format_markdown_report(report, metadata, timestamp)
+    path.write_text(content, encoding="utf-8")
+    return path
 
 
 class StanceEvaluator:

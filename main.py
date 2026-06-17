@@ -1,7 +1,7 @@
 """Stance-detection entry point with the general-reaction fast-path gate."""
 from stance_detector import StanceDetector
 from llm_handler import LLMHandler
-from evaluator import StanceEvaluator
+from evaluator import StanceEvaluator, RunMetadata, write_markdown_report
 import httpx
 import asyncio
 import time
@@ -87,14 +87,18 @@ async def main():
     Loads the data (capped at DEBUG_ROW_LIMIT for manual test runs), applies the
     fast-path gate per row, and either emits the canned fast-path result or calls
     the LLM, then prints a summary of how many rows took each path along with
-    per-iteration and total loop timing.
+    per-iteration and total loop timing. Finally, evaluates the predictions and
+    writes a timestamped markdown report to disk at the end of each run.
     """
     stance_detector = StanceDetector()
     llm_handler = LLMHandler()
 
     data = stance_detector.load_data()
     data = data[:DEBUG_ROW_LIMIT]  # DEBUG / TEMPORARY — see DEBUG_ROW_LIMIT above
-    prompt_config = stance_detector.load_prompt_config("./prompts/config.json", "base")
+    prompt_key = "base"
+    prompt_config = stance_detector.load_prompt_config(
+        "./prompts/config.json", prompt_key
+    )
 
     base_url = "http://10.200.160.182:5555/v1"
     model_name = "Qwen/Qwen3.5-27B-FP8"
@@ -188,6 +192,18 @@ async def main():
     evaluator = StanceEvaluator()
     report = evaluator.evaluate(predictions)
     print(evaluator.format_report(report))
+
+    metadata = RunMetadata(
+        model_name=model_name,
+        base_url=base_url,
+        prompt_key=prompt_key,
+        fast_path_count=fast_path_count,
+        ensemble_count=ensemble_count,
+        llm_count=llm_count,
+        total_elapsed=total_elapsed,
+    )
+    report_path = write_markdown_report(report, metadata)
+    print(f"Markdown report written to {report_path}")
 
 
 if __name__ == "__main__":
