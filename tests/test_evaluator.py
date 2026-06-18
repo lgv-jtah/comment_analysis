@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from evaluator import StanceEvaluator
+from evaluator import StanceEvaluator, write_result_json
 
 GOLD_PATH = Path(__file__).resolve().parent.parent / "gold_labels_corrected.json"
 
@@ -179,6 +179,29 @@ def test_format_report_smoke():
     assert "Per-class metrics" in text
     assert "Confusion matrix" in text
     assert "accuracy=1.0000" in text
+
+
+def test_write_result_json(tmp_path):
+    """write_result_json creates a JSON file with predicted_stance per row."""
+    gold_data = [
+        {"row_index": 0, "gold_stance": "in favor", "comment_text": "Great!"},
+        {"row_index": 1, "gold_stance": "neutral", "comment_text": "Okay."},
+    ]
+    predictions = {0: "in favor", 1: "ablehnung"}
+    path = write_result_json(
+        gold_data,
+        predictions,
+        output_dir=str(tmp_path),
+        timestamp="20260101T000000Z",
+    )
+    assert path.exists()
+    data = json.loads(path.read_text())
+    assert len(data) == 2
+    assert data[0]["predicted_stance"] == "in favor"
+    assert data[1]["predicted_stance"] == "ablehnung"
+    # Original gold fields are preserved.
+    assert data[0]["gold_stance"] == "in favor"
+    assert data[1]["comment_text"] == "Okay."
 
 
 def _load_real_gold() -> list[dict]:

@@ -1,10 +1,14 @@
 """Stance-detection entry point with the general-reaction fast-path gate."""
 from stance_detector import StanceDetector
 from llm_handler import LLMHandler
-from evaluator import StanceEvaluator, RunMetadata, write_markdown_report
+from evaluator import StanceEvaluator, RunMetadata, write_markdown_report, write_result_json
 import httpx
 import asyncio
 import time
+from rich.console import Console
+from rich.panel import Panel
+
+console = Console()
 
 # Fast-path gate thresholds (see general_reaction_gate_konzept.md, Task 1.3).
 # NOTE: 0.6 is an interim placeholder, NOT a tuned production value. The
@@ -94,7 +98,7 @@ async def main():
     llm_handler = LLMHandler()
 
     data = stance_detector.load_data()
-    data = data[:DEBUG_ROW_LIMIT]  # DEBUG / TEMPORARY — see DEBUG_ROW_LIMIT above
+    # data = data[:DEBUG_ROW_LIMIT]  # DEBUG / TEMPORARY — see DEBUG_ROW_LIMIT above
     prompt_key = "base"
     prompt_config = stance_detector.load_prompt_config(
         "./prompts/config.json", prompt_key
@@ -130,8 +134,11 @@ async def main():
                 predictions[item["row_index"]] = result["stance"]
                 fast_path_count += 1
                 iter_elapsed = time.time() - iter_start
-                print(
-                    f"[{index}] FAST-PATH  stance={FAST_PATH_STANCE}  (gr_score={gr_score})  (elapsed={iter_elapsed:.2f}s)"
+                gold = item.get("gold_stance", "?")
+                predicted = result["stance"]
+                match_marker = "[green]✓[/green]" if predicted == gold else "[red]✗[/red]"
+                console.print(
+                    f"[{index}] [bold cyan]FAST-PATH[/bold cyan]  predicted=[yellow]{predicted}[/yellow]  gold=[blue]{gold}[/blue]  {match_marker}  ({iter_elapsed:.2f}s)"
                 )
             elif should_ensemble_path(gr_label, gr_score, comment_text):
                 # Pfad 2 — Ensemble Path: still call the LLM, but inject the
@@ -154,9 +161,17 @@ async def main():
                 )
                 ensemble_count += 1
                 iter_elapsed = time.time() - iter_start
-                print(
-                    f"[{index}] ENSEMBLE   stance={result.get('stance') if result else None}  (gr_score={gr_score})  (elapsed={iter_elapsed:.2f}s)"
-                )
+                gold = item.get("gold_stance", "?")
+                predicted = result.get("stance") if result else None
+                if predicted is None:
+                    console.print(
+                        f"[{index}] [bold magenta]ENSEMBLE[/bold magenta]  [red]FAILED[/red]  gold=[blue]{gold}[/blue]  ({iter_elapsed:.2f}s)"
+                    )
+                else:
+                    match_marker = "[green]✓[/green]" if predicted == gold else "[red]✗[/red]"
+                    console.print(
+                        f"[{index}] [bold magenta]ENSEMBLE[/bold magenta]  predicted=[yellow]{predicted}[/yellow]  gold=[blue]{gold}[/blue]  {match_marker}  ({iter_elapsed:.2f}s)"
+                    )
             else:
                 system, messages = stance_detector.build_messages(
                     prompt_config=prompt_config, item=item
@@ -175,23 +190,31 @@ async def main():
                 )
                 llm_count += 1
                 iter_elapsed = time.time() - iter_start
-                print(
-                    f"[{index}] LLM        stance={result.get('stance') if result else None}  (elapsed={iter_elapsed:.2f}s)"
-                )
+                gold = item.get("gold_stance", "?")
+                predicted = result.get("stance") if result else None
+                if predicted is None:
+                    console.print(
+                        f"[{index}] [bold white]LLM[/bold white]  [red]FAILED[/red]  gold=[blue]{gold}[/blue]  ({iter_elapsed:.2f}s)"
+                    )
+                else:
+                    match_marker = "[green]✓[/green]" if predicted == gold else "[red]✗[/red]"
+                    console.print(
+                        f"[{index}] [bold white]LLM[/bold white]  predicted=[yellow]{predicted}[/yellow]  gold=[blue]{gold}[/blue]  {match_marker}  ({iter_elapsed:.2f}s)"
+                    )
 
     # Measured after the `async with` exits so the HTTP client's connection
     # teardown is included in the total.
     total_elapsed = time.time() - loop_start
-    print(
+    console.print(
         f"Fast-pathed: {fast_path_count}  |  ensemble: {ensemble_count}  "
         f"|  LLM calls: {llm_count}  "
         f"|  total: {fast_path_count + ensemble_count + llm_count}"
     )
-    print(f"Total loop time: {total_elapsed:.2f}s")
+    console.print(f"Total loop time: {total_elapsed:.2f}s")
 
     evaluator = StanceEvaluator()
     report = evaluator.evaluate(predictions)
-    print(evaluator.format_report(report))
+    console.print(Panel(evaluator.format_report(report), title="[bold]Evaluation Report[/bold]"))
 
     metadata = RunMetadata(
         model_name=model_name,
@@ -203,7 +226,10 @@ async def main():
         total_elapsed=total_elapsed,
     )
     report_path = write_markdown_report(report, metadata)
-    print(f"Markdown report written to {report_path}")
+    console.print(f"Markdown report written to {report_path}")
+
+    result_path = write_result_json(data, predictions)
+    console.print(f"[green]Result JSON written to[/green] {result_path}")
 
 
 if __name__ == "__main__":

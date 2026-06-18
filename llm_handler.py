@@ -112,7 +112,7 @@ class LLMHandler:
                 if enable_thinking:
                     body["extra_body"] = {
                         "chat_template_kwargs": {"enable_thinking": True},
-                        "thinking": {"type": "enabled", "budget_tokens": THINKING_BUDGET},
+                        #"thinking": {"type": "enabled", "budget_tokens": THINKING_BUDGET},
                     }
 
                 url = f"{base_url.rstrip('/')}/chat/completions"

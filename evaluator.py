@@ -357,3 +357,45 @@ class StanceEvaluator:
             )
 
         return "\n".join(lines)
+
+
+def write_result_json(
+    gold_data: list[dict],
+    predictions: dict,
+    output_dir: str = "results",
+    timestamp: str | None = None,
+) -> Path:
+    """Write per-row results (gold + predicted stance) to a JSON file.
+
+    Each output entry is the original gold row with an added
+    ``predicted_stance`` key. Rows whose ``row_index`` has no entry in
+    *predictions* receive ``None`` for that key.
+
+    Args:
+        gold_data: The gold-label rows (each must contain ``row_index``).
+        predictions: Mapping of ``row_index`` -> predicted stance string (or
+            ``None`` for rows that were skipped / failed).
+        output_dir: Directory to write into; created if absent.
+        timestamp: UTC timestamp string used in the filename
+            (``"%Y%m%dT%H%M%SZ"`` format). Defaults to the current UTC time.
+
+    Returns:
+        The :class:`Path` actually written.
+    """
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if timestamp is None:
+        timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    base = out_dir / f"{timestamp}_results"
+    path = base.with_suffix(".json")
+    counter = 1
+    while path.exists():
+        path = base.with_name(f"{base.name}_{counter}").with_suffix(".json")
+        counter += 1
+    rows = []
+    for row in gold_data:
+        entry = dict(row)
+        entry["predicted_stance"] = predictions.get(row["row_index"])
+        rows.append(entry)
+    path.write_text(json.dumps(rows, ensure_ascii=False, indent=2))
+    return path
