@@ -11,6 +11,7 @@ from pathlib import Path
 
 from main import (
     FAST_PATH_MAX_WORDS,
+    FAST_PATH_STANCE,
     GR_SCORE_THRESHOLD,
     should_ensemble_path,
     should_fast_path,
@@ -19,6 +20,12 @@ from main import (
 GOLD_LABELS_PATH = (
     Path(__file__).resolve().parent.parent / "gold_labels_corrected.json"
 )
+
+
+def test_fast_path_stance_is_neutral():
+    # Regression guard: the fast-path stance must use the lowercase gold-label
+    # vocabulary value "neutral" (previously erroneously "in favor").
+    assert FAST_PATH_STANCE == "neutral"
 
 
 def test_fires_for_short_positive_comment():

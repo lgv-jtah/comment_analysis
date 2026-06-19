@@ -16,8 +16,14 @@ console = Console()
 # lands, do not treat this number as final.
 GR_SCORE_THRESHOLD = 0.6
 FAST_PATH_MAX_WORDS = 5
-FAST_PATH_STANCE = "in favor"
-FAST_PATH_EXPLANATION = "Allgemeine positive Reaktion auf den gesamten Beitrag"
+# The fast-path stance must be a value from the lowercase gold-label vocabulary
+# ("neutral"), NOT a free-form phrase — the evaluator matches predictions against
+# gold labels by exact string. The German explanation reads "general positive
+# reaction — neutral per machine-classification (KM), positive at comment level":
+# the per-row stance label is deliberately "neutral" even though the comment-level
+# signal is positive, so the two values intentionally differ.
+FAST_PATH_STANCE = "neutral"
+FAST_PATH_EXPLANATION = "Allgemeine positive Reaktion — per KM neutral, Kommentar-Level positiv"
 
 # DEBUG / TEMPORARY — for manual test runs only. Remove before any full
 # production run: this caps the loop at the first few rows instead of all 155.
@@ -31,8 +37,9 @@ def should_fast_path(
 
     Implements "Pfad 1 — Fast Path" from general_reaction_gate_konzept.md
     (Task 1.3): a short comment that the upstream general-reaction classifier
-    confidently labelled as a positive reaction is assumed "in favor" without
-    a dedicated stance-detection LLM call.
+    confidently labelled as a positive reaction is assumed neutral per-KM
+    (positive signal at comment level) without a dedicated stance-detection
+    LLM call.
 
     Args:
         general_reaction_label: Label from the general-reaction classifier;
@@ -104,7 +111,8 @@ async def main():
         "./prompts/config.json", prompt_key
     )
 
-    base_url = "http://10.200.160.182:5555/v1"
+    # base_url = "http://10.200.160.182:5555/v1"
+    base_url = "http://217.160.202.33:5555/v1"
     model_name = "Qwen/Qwen3.5-27B-FP8"
 
     fast_path_count = 0
