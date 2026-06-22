@@ -1,0 +1,12 @@
+{
+    "base": {
+        "description": "Reaction Gate Concept",
+        "system_prompt": "system.txt",
+        "user_prompt": "user_prompt.txt"
+    },
+    "key_message": {
+        "description": "Key message extraction",
+        "system_prompt": "key_message_system.txt",
+        "user_prompt": "key_message_user.txt"
+    }
+}

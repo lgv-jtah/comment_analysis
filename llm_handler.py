@@ -48,10 +48,18 @@ class Stance(BaseModel):
     stance: str
     explanation: str
 
+class KeyMessage(BaseModel):
+    """Schema for a key-message extraction result returned by the model."""
+
+    key_message: str
+    key_message_type: str
+    key_message_explanation: str
+
 class LLMHandler:
     """Wraps calls to an OpenAI-compatible (vLLM) chat completions endpoint."""
 
     def __init__(self):
+        """Initialize the handler with a default model and a single-slot semaphore."""
         self.model_name = "Qwen/Qwen3.5-27B-FP8"
         self.semaphore = asyncio.Semaphore(1)
         pass
@@ -66,6 +74,7 @@ class LLMHandler:
     semaphore: asyncio.Semaphore,
     enable_thinking: bool = False,
     api_key: str = "not-needed",
+    response_schema: type[BaseModel] | None = None,
     ) -> dict | None:
         """Call a vLLM/OpenAI-compatible chat completions endpoint.
 
@@ -79,6 +88,9 @@ class LLMHandler:
             enable_thinking: If True, request the model's thinking mode and
                 strip any ``<think>`` block from the returned content.
             api_key: Bearer token; defaults to a placeholder for local servers.
+            response_schema: Optional Pydantic model whose JSON schema constrains
+                the model's structured output. Defaults to ``Stance`` when None,
+                preserving backward compatibility with existing callers.
 
         Returns:
             The parsed JSON object from the model's reply, or None if the
@@ -96,11 +108,17 @@ class LLMHandler:
                     "temperature": 0.1,  # Low temperature for consistency
                 }
 
+                # `response_schema or Stance` (instead of `if response_schema is
+                # None`) intentionally also falls back to Stance for any falsy
+                # value. In practice callers pass either a BaseModel subclass or
+                # None, so this keeps the default behaviour for legacy callers
+                # while staying a single concise expression.
+                schema_model = response_schema or Stance
                 response_format = {
                     "type": "json_schema",
                     "json_schema": {
-                        "name": "stance-detection",
-                        "schema": Stance.model_json_schema()
+                        "name": schema_model.__name__,
+                        "schema": schema_model.model_json_schema()
                     }
                 }
                 # Must stay a native dict: httpx's json= kwarg serializes the

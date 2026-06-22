@@ -1,0 +1,14 @@
+Verfahrensbeschreibung:
+$proceeding_description
+
+Bürgerbeitrag:
+$contribution
+
+Identifiziere die zentrale Kernaussage (key_message) des Bürgerbeitrags im Kontext des Verfahrens. Bestimme den Typ der Kernaussage (key_message_type), zum Beispiel: Kritik, Vorschlag, Zustimmung, Ablehnung, Frage oder Sonstiges. Gib eine kurze Begründung (key_message_explanation).
+
+Antworte ausschließlich mit einem JSON-Objekt mit genau diesen drei Feldern und ohne Backticks:
+{
+  "key_message": "...",
+  "key_message_type": "...",
+  "key_message_explanation": "..."
+}
