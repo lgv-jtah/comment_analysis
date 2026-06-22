@@ -5,10 +5,17 @@ from evaluator import StanceEvaluator, RunMetadata, write_markdown_report, write
 import httpx
 import asyncio
 import time
+from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
+from create_dataset import CreateDataset
 
 console = Console()
+
+# Resolve relative to this file (not the CWD) so paths are stable no matter
+# which directory the app is launched from.
+DATA_DIR = Path(__file__).resolve().parent / "data"
+CONTRIBUTIONS_PATH = DATA_DIR / "contributions.parquet"
 
 # Fast-path gate thresholds (see general_reaction_gate_konzept.md, Task 1.3).
 # NOTE: 0.6 is an interim placeholder, NOT a tuned production value. The
@@ -92,7 +99,7 @@ def should_ensemble_path(
     )
 
 
-async def main():
+async def run_stance_detection():
     """Run stance detection over the gold-label dataset.
 
     Loads the data (capped at DEBUG_ROW_LIMIT for manual test runs), applies the
@@ -111,8 +118,8 @@ async def main():
         "./prompts/config.json", prompt_key
     )
 
-    # base_url = "http://10.200.160.182:5555/v1"
     base_url = "http://217.160.202.33:5555/v1"
+    # base_url = "http://10.200.160.182:5555/v1"
     model_name = "Qwen/Qwen3.5-27B-FP8"
 
     fast_path_count = 0
@@ -240,5 +247,96 @@ async def main():
     console.print(f"[green]Result JSON written to[/green] {result_path}")
 
 
+def _prompt_overwrite(path: Path) -> bool:
+    """Ask the user whether to overwrite an existing file.
+
+    Args:
+        path: Path to the file that already exists, shown in the prompt.
+
+    Returns:
+        True if the user explicitly confirms with "y"/"yes" (case-insensitive);
+        False for any other input, so the default (blank) answer is a decline.
+    """
+    console.print(f"[yellow]A saved file already exists at {path}[/yellow]")
+    answer = input("Overwrite? [y/N] ").strip().lower()
+    return answer in ("y", "yes")
+
+
+def fetch_contributions() -> None:
+    """Fetch DIPAS projects and their contributions, then save them to parquet.
+
+    Prompts before overwriting an existing contributions file and aborts early if
+    no projects are returned, so a failed upstream fetch never clobbers good data.
+    """
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if CONTRIBUTIONS_PATH.exists():
+        if not _prompt_overwrite(CONTRIBUTIONS_PATH):
+            console.print("[yellow]Skipping fetch — existing file kept.[/yellow]")
+            return
+
+    dataset = CreateDataset()
+
+    console.print("[bold]Fetching projects...[/bold]")
+    df_projects = dataset.create()
+    if df_projects.empty or "id" not in df_projects.columns:
+        console.print("[red]No projects fetched — aborting.[/red]")
+        return
+
+    # Drop missing ids first, then stringify: the downstream API expects string
+    # ids, and dropping NaN before the cast avoids "nan" entries in the list.
+    project_ids = df_projects["id"].dropna().astype(str).tolist()
+    console.print(f"[bold]Fetching contributions for {len(project_ids)} projects...[/bold]")
+    console.print("=" * 60)
+    df = dataset.fetch_all_contributions(project_ids)
+    console.print("=" * 60)
+    console.print(f"[green]Total contributions fetched: {len(df)}[/green]")
+
+    summary = dataset.contributions_summary(df)
+    if summary:
+        console.print(Panel(summary, title="[bold]Contributions per project (top 10)[/bold]"))
+
+    df.to_parquet(CONTRIBUTIONS_PATH)
+    console.print(f"[green]Contributions saved to {CONTRIBUTIONS_PATH}[/green]")
+
+
+MENU_OPTIONS = {"1", "2", "q"}
+
+
+def run_menu() -> str:
+    """Display the interactive menu and return the user's validated choice.
+
+    Loops until the user enters a valid option, re-prompting on bad input.
+
+    Returns:
+        The selected option, one of "1", "2", or "q".
+    """
+    while True:
+        console.print(Panel(
+            "[bold]1[/bold] — Fetch contributions\n[bold]2[/bold] — Run stance detection\n[bold]q[/bold] — Quit",
+            title="[bold cyan]DIPAS Analysis[/bold cyan]",
+        ))
+        choice = input("Select option: ").strip().lower()
+        if choice in MENU_OPTIONS:
+            return choice
+        console.print("[red]Invalid choice — enter 1, 2, or q.[/red]")
+
+
+def main() -> None:
+    """Thin synchronous dispatcher: read the menu choice and run the action.
+
+    Kept deliberately small so the menu, fetch, and stance-detection flows can be
+    unit-tested in isolation.
+    """
+    choice = run_menu()
+    if choice == "1":
+        fetch_contributions()
+    elif choice == "2":
+        # run_stance_detection is a coroutine; asyncio.run() drives it to
+        # completion from this synchronous entry point and owns the event loop.
+        asyncio.run(run_stance_detection())
+    else:
+        console.print("[yellow]Goodbye.[/yellow]")
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
