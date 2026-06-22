@@ -8,7 +8,8 @@ analysis.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+import urllib.parse
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import requests
@@ -78,6 +79,97 @@ class CreateDataset:
             The assembled DataFrame, empty if the API call failed.
         """
         return self.build_dataframe(self.fetch_projects())
+
+    def fetch_all_contributions(
+        self, project_ids: List[str]
+    ) -> pd.DataFrame:
+        """Fetch contributions for many projects into a single DataFrame.
+
+        For each project id, this calls the DIPAS contributions endpoint
+        (``{api_url}{project_id}/contributions/``) and flattens the returned
+        GeoJSON features into rows.
+
+        Args:
+            project_ids: Project ids to fetch contributions for. These are
+                typically obtained from ``create()["id"].tolist()``.
+                ``self.api_url`` must end with ``/`` for the URL to be built
+                correctly (the default endpoint does).
+
+        Returns:
+            A DataFrame with one row per contribution and the columns
+            ``project_id``, ``id``, ``title``, ``contributionContent`` and
+            ``category``. The DataFrame is empty if no contributions were
+            collected.
+
+        Notes:
+            Per-project :class:`requests.RequestException` errors are caught
+            and logged, and the partial results gathered so far are still
+            returned. JSON decode errors are *not* caught and will propagate
+            to the caller.
+        """
+        all_contributions = []
+
+        for project_id in project_ids:
+            # quote(..., safe="") percent-encodes the id so it cannot break
+            # out of the path segment or inject extra URL components.
+            safe_id = urllib.parse.quote(str(project_id), safe="")
+            url = f"{self.api_url}{safe_id}/contributions/"
+            try:
+                response = requests.get(url, timeout=self.timeout)
+                response.raise_for_status()
+                data = response.json()
+                for feature in data.get("features", []):
+                    props = feature.get("properties", {})
+                    all_contributions.append(
+                        {
+                            "project_id": project_id,
+                            "id": props.get("id"),
+                            "title": props.get("title"),
+                            "contributionContent": props.get(
+                                "contributionContent"
+                            ),
+                            "category": props.get("category"),
+                        }
+                    )
+                print(
+                    f"OK {project_id}: "
+                    f"{len(data.get('features', []))} contributions"
+                )
+            except requests.RequestException as e:
+                # Only network/HTTP errors are caught per-project so a single
+                # bad project doesn't abort the whole run; the partial results
+                # gathered so far are still returned below. JSON decode errors
+                # are deliberately NOT caught here -- a malformed payload signals
+                # an unexpected API contract change that should surface loudly
+                # rather than be silently treated as "no contributions".
+                print(f"FAIL {project_id}: {e}")
+
+        return pd.DataFrame(all_contributions)
+
+    def contributions_summary(
+        self, df: pd.DataFrame, top_n: int = 10
+    ) -> str:
+        """Summarize contribution counts per project.
+
+        Args:
+            df: A DataFrame produced by :meth:`fetch_all_contributions`.
+            top_n: Maximum number of projects to include, ordered by
+                descending contribution count. Defaults to 10.
+
+        Returns:
+            A human-readable string mapping project ids to their contribution
+            counts, or an empty string when ``df`` is empty or lacks the
+            ``project_id`` column.
+        """
+        if df.empty or "project_id" not in df.columns:
+            return ""
+        return (
+            df.groupby("project_id")
+            .size()
+            .sort_values(ascending=False)
+            .head(top_n)
+            .to_string()
+        )
 
     # ── Private helpers ────────────────────────────────────────────
 
