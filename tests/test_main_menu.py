@@ -245,3 +245,172 @@ def test_main_quits(monkeypatch):
         main, "fetch_contributions", lambda: pytest.fail("should not fetch")
     )
     main.main()
+
+
+# --- sample contributions ---
+
+
+class FakeSampler:
+    """Network-free stand-in for ``sample_contributions.SampleContributions``.
+
+    Class-level attributes let each test configure the return value / raised
+    exception and inspect how the sampler was constructed and called.
+    """
+
+    init_args = None
+    sample_called = False
+    sample_return = "/tmp/sample_5.parquet"
+    sample_raises = None
+
+    def __init__(self, *args, **kwargs):
+        type(self).init_args = (args, kwargs)
+
+    def sample(self):
+        type(self).sample_called = True
+        if type(self).sample_raises is not None:
+            raise type(self).sample_raises
+        return type(self).sample_return
+
+
+@pytest.fixture
+def fresh_sampler():
+    """Reset FakeSampler class-level state and yield the class."""
+    FakeSampler.init_args = None
+    FakeSampler.sample_called = False
+    FakeSampler.sample_return = "/tmp/sample_5.parquet"
+    FakeSampler.sample_raises = None
+    return FakeSampler
+
+
+def test_run_menu_returns_3(monkeypatch):
+    """run_menu returns "3" when the user selects option 3."""
+    monkeypatch.setattr("builtins.input", lambda *a: "3")
+    assert main.run_menu() == "3"
+
+
+def test_main_dispatches_to_sample(monkeypatch):
+    """main routes choice "3" to sample_contributions."""
+    monkeypatch.setattr(main, "run_menu", lambda: "3")
+    called = {"sample": False}
+    monkeypatch.setattr(
+        main, "sample_contributions", lambda: called.__setitem__("sample", True)
+    )
+    main.main()
+    assert called["sample"] is True
+
+
+def test_prompt_positive_int_valid(monkeypatch):
+    """_prompt_positive_int returns the parsed integer for valid input."""
+    monkeypatch.setattr("builtins.input", lambda *a: "5")
+    assert main._prompt_positive_int("n: ") == 5
+
+
+def test_prompt_positive_int_reprompts_on_nonnumeric(monkeypatch):
+    """_prompt_positive_int re-prompts when the input is not a number."""
+    answers = iter(["abc", "5"])
+    calls = {"n": 0}
+
+    def fake_input(*a):
+        calls["n"] += 1
+        return next(answers)
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    assert main._prompt_positive_int("n: ") == 5
+    assert calls["n"] == 2
+
+
+def test_prompt_positive_int_reprompts_on_nonpositive(monkeypatch):
+    """_prompt_positive_int re-prompts on zero or negative input."""
+    answers = iter(["0", "-1", "3"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+    assert main._prompt_positive_int("n: ") == 3
+
+
+def test_prompt_project_ids_comma_separated(monkeypatch):
+    """_prompt_project_ids splits a comma-separated list and strips tokens."""
+    monkeypatch.setattr("builtins.input", lambda *a: "A, B")
+    assert main._prompt_project_ids(["A", "B", "C"]) == ["A", "B"]
+
+
+def test_prompt_project_ids_all(monkeypatch):
+    """_prompt_project_ids returns every available ID for input "all"."""
+    monkeypatch.setattr("builtins.input", lambda *a: "all")
+    available = ["A", "B", "C"]
+    assert main._prompt_project_ids(available) == available
+
+
+def test_prompt_project_ids_reprompts_on_empty(monkeypatch):
+    """_prompt_project_ids re-prompts until a non-empty selection is given."""
+    answers = iter(["", "  ", "A"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+    assert main._prompt_project_ids(["A", "B"]) == ["A"]
+
+
+def test_sample_contributions_happy_path(
+    monkeypatch, tmp_paths, fresh_sampler
+):
+    """sample_contributions builds the sampler with the chosen IDs and calls sample."""
+    data_dir, contrib_path = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame({"project_id": ["A", "B"], "id": [1, 2]}).to_parquet(contrib_path)
+
+    monkeypatch.setattr(main, "SampleContributions", fresh_sampler)
+    answers = iter(["A, B", "5"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+
+    main.sample_contributions()
+
+    assert fresh_sampler.sample_called is True
+    _, kwargs = fresh_sampler.init_args
+    assert kwargs["project_ids"] == ["A", "B"]
+    assert kwargs["n"] == 5
+    assert kwargs["source_path"] == contrib_path
+
+
+def test_sample_contributions_missing_file(
+    monkeypatch, tmp_paths, fresh_sampler
+):
+    """sample_contributions aborts (no sampler) when the file is missing."""
+    monkeypatch.setattr(main, "SampleContributions", fresh_sampler)
+    monkeypatch.setattr("builtins.input", lambda *a: pytest.fail("no input expected"))
+
+    main.sample_contributions()
+
+    assert fresh_sampler.init_args is None
+    assert fresh_sampler.sample_called is False
+
+
+def test_sample_contributions_catches_valueerror(
+    monkeypatch, tmp_paths, fresh_sampler
+):
+    """sample_contributions swallows a ValueError raised by the sampler."""
+    data_dir, contrib_path = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame({"project_id": ["A"], "id": [1]}).to_parquet(contrib_path)
+
+    fresh_sampler.sample_raises = ValueError("boom")
+    monkeypatch.setattr(main, "SampleContributions", fresh_sampler)
+    answers = iter(["A", "5"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+
+    # Should not raise.
+    main.sample_contributions()
+    assert fresh_sampler.sample_called is True
+
+
+def test_sample_contributions_catches_filenotfounderror(
+    monkeypatch, tmp_paths, fresh_sampler
+):
+    """sample_contributions swallows a FileNotFoundError raised by the sampler."""
+    data_dir, contrib_path = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame({"project_id": ["A"], "id": [1]}).to_parquet(contrib_path)
+
+    fresh_sampler.sample_raises = FileNotFoundError("gone")
+    monkeypatch.setattr(main, "SampleContributions", fresh_sampler)
+    answers = iter(["A", "5"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+
+    # Should not raise.
+    main.sample_contributions()
+    assert fresh_sampler.sample_called is True

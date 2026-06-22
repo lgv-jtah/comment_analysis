@@ -9,6 +9,8 @@ from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 from create_dataset import CreateDataset
+import pandas as pd
+from sample_contributions import SampleContributions
 
 console = Console()
 
@@ -262,6 +264,85 @@ def _prompt_overwrite(path: Path) -> bool:
     return answer in ("y", "yes")
 
 
+def _prompt_positive_int(prompt: str) -> int:
+    """Prompt for a positive integer, re-prompting until one is given.
+
+    Args:
+        prompt: The text shown to the user when asking for input.
+
+    Returns:
+        The parsed integer, guaranteed to be greater than zero.
+    """
+    while True:
+        raw = input(prompt).strip()
+        try:
+            value = int(raw)
+        except ValueError:
+            console.print("[red]Please enter a whole number.[/red]")
+            continue
+        if value <= 0:
+            console.print("[red]Please enter a number greater than zero.[/red]")
+            continue
+        return value
+
+
+def _prompt_project_ids(available_ids: list[str]) -> list[str]:
+    """Prompt for the project IDs to sample, or all of them.
+
+    Shows the available IDs, then reads a comma-separated selection. The literal
+    input ``"all"`` (case-insensitive) selects every available ID. Empty tokens
+    are dropped and the prompt repeats until at least one ID is chosen.
+
+    Args:
+        available_ids: All project IDs present in the contributions data.
+
+    Returns:
+        The selected project IDs as a list of strings.
+    """
+    while True:
+        console.print(f"[cyan]Available project IDs:[/cyan] {', '.join(available_ids)}")
+        raw = input("Project IDs (comma-separated, or 'all'): ").strip()
+        # Lowercase before comparing so "ALL", "All", etc. all trigger the
+        # select-everything shortcut; the literal must match case-insensitively.
+        if raw.lower() == "all":
+            return list(available_ids)
+        ids = [token.strip() for token in raw.split(",") if token.strip()]
+        if ids:
+            return ids
+        console.print("[red]Please enter at least one project ID.[/red]")
+
+
+def sample_contributions() -> None:
+    """Draw a random sample of contributions for chosen projects.
+
+    Loads the fetched contributions file, prompts for project IDs and a sample
+    size, then delegates to :class:`SampleContributions`. Aborts with a message
+    if the file is missing or lacks the ``project_id`` column.
+    """
+    if not CONTRIBUTIONS_PATH.exists():
+        console.print(f"[red]No contributions file found at {CONTRIBUTIONS_PATH}. Run option 1 (Fetch contributions) first.[/red]")
+        return
+
+    df = pd.read_parquet(CONTRIBUTIONS_PATH)
+    if "project_id" not in df.columns:
+        console.print("[red]Contributions file is missing the 'project_id' column.[/red]")
+        return
+
+    available_ids = df["project_id"].astype(str).unique().tolist()
+    ids = _prompt_project_ids(available_ids)
+    n = _prompt_positive_int("Sample size (n): ")
+
+    try:
+        # Pass source_path explicitly rather than relying on SampleContributions'
+        # default: tests redirect main.CONTRIBUTIONS_PATH into tmp_path, and the
+        # sampler must read the same file this function already validated above.
+        sampler = SampleContributions(project_ids=ids, n=n, source_path=CONTRIBUTIONS_PATH)
+        result_path = sampler.sample()
+        console.print(f"[green]Sample written to {result_path}[/green]")
+    except (FileNotFoundError, ValueError) as e:
+        console.print(f"[red]Sampling failed: {e}[/red]")
+
+
 def fetch_contributions() -> None:
     """Fetch DIPAS projects and their contributions, then save them to parquet.
 
@@ -299,7 +380,7 @@ def fetch_contributions() -> None:
     console.print(f"[green]Contributions saved to {CONTRIBUTIONS_PATH}[/green]")
 
 
-MENU_OPTIONS = {"1", "2", "q"}
+MENU_OPTIONS = {"1", "2", "3", "q"}
 
 
 def run_menu() -> str:
@@ -308,17 +389,17 @@ def run_menu() -> str:
     Loops until the user enters a valid option, re-prompting on bad input.
 
     Returns:
-        The selected option, one of "1", "2", or "q".
+        The selected option, one of "1", "2", "3", or "q".
     """
     while True:
         console.print(Panel(
-            "[bold]1[/bold] — Fetch contributions\n[bold]2[/bold] — Run stance detection\n[bold]q[/bold] — Quit",
+            "[bold]1[/bold] — Fetch contributions\n[bold]2[/bold] — Run stance detection\n[bold]3[/bold] — Sample contributions\n[bold]q[/bold] — Quit",
             title="[bold cyan]DIPAS Analysis[/bold cyan]",
         ))
         choice = input("Select option: ").strip().lower()
         if choice in MENU_OPTIONS:
             return choice
-        console.print("[red]Invalid choice — enter 1, 2, or q.[/red]")
+        console.print("[red]Invalid choice — enter 1, 2, 3, or q.[/red]")
 
 
 def main() -> None:
@@ -334,6 +415,8 @@ def main() -> None:
         # run_stance_detection is a coroutine; asyncio.run() drives it to
         # completion from this synchronous entry point and owns the event loop.
         asyncio.run(run_stance_detection())
+    elif choice == "3":
+        sample_contributions()
     else:
         console.print("[yellow]Goodbye.[/yellow]")
 
