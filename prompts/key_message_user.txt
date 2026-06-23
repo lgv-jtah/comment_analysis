@@ -1,14 +1,56 @@
-Verfahrensbeschreibung:
-$proceeding_description
+Ich gebe dir jeweils einen Beitrag. Extrahiere die Hauptaussagen aus diesem Beitrag.
+        Der Beitrag stammt aus einem Beteiligungsverfahren. Dieses Beteiligungsverfahren wird
+        wie folgt beschrieben:
 
-Bürgerbeitrag:
-$contribution
+        $proceeding_description
 
-Identifiziere die zentrale Kernaussage (key_message) des Bürgerbeitrags im Kontext des Verfahrens. Bestimme den Typ der Kernaussage (key_message_type), zum Beispiel: Kritik, Vorschlag, Zustimmung, Ablehnung, Frage oder Sonstiges. Gib eine kurze Begründung (key_message_explanation).
+        Beachte dabei folgende Regeln:
+        1. Verarbeite den gesamten Beitrag von Anfang bis Ende, ohne Auslassungen.
+        2. Eine Hauptaussage besteht mindestens aus einem Nomen und einem Verb.
+        3. Eine Hauptaussage besteht in der Regel aus vier bis sieben Wörtern.
+        4. Konkrete und spezifische Ortsbezüge sind für Hauptaussagen nicht relevant und sollen von dir nicht beachtet werden.
+        5. Es gibt nur 4 Arten von Hauptaussagen (Hauptaussagenart):
+            a) Wunsch: Beschreibt eine geforderte Veränderung für die Zukunft. Leite Wünsche nicht aus reinen Beschreibungen ab.
+            b) Problem: Beschreibt einen gegenwärtigen negativen Zustand.
+            c) Qualität: Beschreibt einen gegenwärtigen positiven Zustand.
+            d) Zustand: Beschreibt neutral einen gegenwärtigen Zustand.
+        6. Sätze, die einen negativen Zustand beschreiben, gehören in die Kategorie "Problem".
+        7. Nur wenn ein Wunsch explizit erkennbar ist, darf der Satz als "Wunsch" formuliert werden.
+        8. Bei der Formulierung der Hauptaussagen darf eine Negation nicht einfach ins Gegenteil umgewandelt werden, es sei denn, dies wird durch die Satzbedeutung eindeutig unterstützt.
+        9. Ordne die Sätze aus dem Beitrag deinen Hauptaussagen zu.
+        10. Füge für jede Hauptaussage eine kurze Begründung hinzu.
+
+
+        Prüfe:
+        1. Das die Hauptaussagen strukturell sinnvoll und klar formuliert sind.
+        2. Die Hauptaussagen nicht mehr als sieben Wörter beinhalten.
+        3. Die Hauptaussagen keine konkreten und spezifischen Ortsbezüge enthalten.
+        4. Eine Hauptaussage darf die Bedeutung des Originalsatzes nicht umkehren oder verändern. Negative Zustände (z. B. "fehlen") müssen als Problem formuliert werden und dürfen nicht als Wunsch oder positive Aussage dargestellt werden.
+        5. Die Hauptaussagen die wichtigsten Punkte des Beitrages widerspiegeln und die Relevanz für die Stadtplanung verdeutlichen.
+        6. Ein Satz, der einen aktuellen negativen Zustand beschreibt, darf nicht zu einem Wunsch umformuliert werden, sofern dies im Originalsatz nicht ausdrücklich als Wunsch erkennbar ist.
+        7. Hauptaussagen die eine Konkjunktion (Bindewort) enthalten in mehrere Hauptaussagen aufgeteilt werden.
+        8. Die Sätze (Satz) aus dem Beitrag in ihrem Original wiedergegeben werden.
+        9. Dass du für die Sätze (Satz) keine Umformulierungen oder Ergänzungen und keine Rechtschreib- oder Grammatikkorrektur gemacht hast.
+        10. Dass du für die Sätze (Satz) keine Korrekturen von Steuerzeichen oder Formatierungen gemacht hast.
+        11. Wenn eine dieser Regeln nicht eingehalten wird. Beginne von vorne.
+
+
+        Der Beitrag lautet: '$contribution'
 
 Antworte ausschließlich mit einem JSON-Objekt mit genau diesen drei Feldern und ohne Backticks:
-{
-  "key_message": "...",
-  "key_message_type": "...",
-  "key_message_explanation": "..."
-}
+
+        {
+            "key_messages":
+                [
+                    {
+                        "key_message": "<Hauptaussage>",
+                        "key_message_type": "<Hauptaussagenart>",
+                        "related_sentences":
+                                            [
+                                                "<Satz>",
+                                                …
+                                            ],
+                        "explanation":"<Begründung>"
+                    }
+                ]
+        }

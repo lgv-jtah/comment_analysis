@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import requests
+from rich.console import Console
+
 
 API_URL = "https://beteiligung.hamburg/drupal/dipas-pds/projects/"
 
