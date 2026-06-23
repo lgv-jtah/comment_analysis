@@ -5,9 +5,11 @@ from evaluator import StanceEvaluator, RunMetadata, write_markdown_report, write
 import httpx
 import asyncio
 import time
+import numpy as np
 from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
+from rich.markup import escape
 from create_dataset import CreateDataset
 import pandas as pd
 from sample_contributions import SampleContributions
@@ -22,7 +24,8 @@ CONTRIBUTIONS_PATH = DATA_DIR / "contributions.parquet"
 
 # LLM endpoint configuration, shared by stance detection and key-message
 # extraction. Kept at module level so both flows reference the same values.
-LLM_BASE_URL = "http://217.160.202.33:5555/v1"
+# LLM_BASE_URL = "http://217.160.202.33:5555/v1"
+LLM_BASE_URL = "http://10.200.160.182:5555/v1"
 LLM_MODEL_NAME = "Qwen/Qwen3.5-27B-FP8"
 
 # Fast-path gate thresholds (see general_reaction_gate_konzept.md, Task 1.3).
@@ -381,7 +384,9 @@ async def run_key_message_extraction() -> None:
     single ``key_messages`` column is added: each cell holds the list of
     key-message dicts extracted for that row (or ``None`` if extraction failed) —
     not the former three separate ``key_message`` / ``key_message_type`` /
-    ``explanation`` columns. Aborts early if no file is selected, the column is
+    ``explanation`` columns. The per-contribution elapsed time is printed after
+    each row and the total extraction time is printed to the console once every
+    row has been processed. Aborts early if no file is selected, the column is
     missing, or the user declines to overwrite an existing output.
     """
     source_path = _pick_parquet_file(DATA_DIR)
@@ -406,8 +411,10 @@ async def run_key_message_extraction() -> None:
     key_messages_col: list[list[dict] | None] = []
 
     total = len(df)
+    total_start = time.time()
     async with httpx.AsyncClient() as client:
         for index, (_, row) in enumerate(df.iterrows(), start=1):
+            iter_start = time.time()
             # Treat missing content as an empty string so a NaN cell does not
             # crash the extractor; the LLM simply receives no contribution text.
             contribution = "" if pd.isna(row["contributionContent"]) else str(row["contributionContent"])
@@ -417,17 +424,72 @@ async def run_key_message_extraction() -> None:
                 proceeding_description=description,
                 semaphore=semaphore,
             )
+            iter_elapsed = time.time() - iter_start
             if result is not None:
                 key_messages_col.append(result)
-                console.print(f"[{index}/{total}] {len(result)} key messages found")
+                console.print(f"[{index}/{total}] {len(result)} key messages found ({iter_elapsed:.2f}s)")
             else:
                 key_messages_col.append(None)
-                console.print(f"[red][{index}/{total}] FAILED[/red]")
+                console.print(f"[red][{index}/{total}] FAILED ({iter_elapsed:.2f}s)[/red]")
 
+    total_elapsed = time.time() - total_start
+    console.print(f"Total extraction time: {total_elapsed:.2f}s")
     result_df = df.copy()
     result_df["key_messages"] = key_messages_col
     result_df.to_parquet(output_path)
     console.print(f"[green]Key messages saved to {output_path}[/green]")
+
+
+def inspect_key_messages() -> None:
+    """Interactively page through a parquet file's extracted key messages.
+
+    Prompts the user to pick a source parquet file and validates that it contains
+    both a ``key_messages`` and a ``contributionContent`` column, aborting with a
+    message if either is missing. Each row is then rendered in its own Rich panel
+    showing the contribution text followed by its extracted key messages (or a
+    ``FAILED`` marker when the cell holds no result). After each panel the user
+    advances to the next row by entering "n" (or pressing Enter for the default)
+    or exits early by entering "q".
+    """
+    source_path = _pick_parquet_file(DATA_DIR)
+    if source_path is None:
+        return
+
+    df = pd.read_parquet(source_path)
+    if "key_messages" not in df.columns:
+        console.print("[red]Selected file is missing the 'key_messages' column.[/red]")
+        return
+    if "contributionContent" not in df.columns:
+        console.print("[red]Selected file is missing the 'contributionContent' column.[/red]")
+        return
+
+    total = len(df)
+    for index, (_, row) in enumerate(df.iterrows(), start=1):
+        contribution = "" if pd.isna(row["contributionContent"]) else str(row["contributionContent"])
+        km = row["key_messages"]
+        is_failed = km is None or (np.ndim(km) == 0 and pd.isna(km))
+
+        lines = [f"[bold]Contribution:[/bold] {escape(contribution)}\n"]
+        if is_failed:
+            lines.append("[red]FAILED[/red]")
+        else:
+            for i, msg in enumerate(km, start=1):
+                lines.append(f"[bold cyan]Key Message {i}[/bold cyan]")
+                lines.append(f"  [bold]Message:[/bold]     {escape(str(msg.get('key_message', '')))}")
+                lines.append(f"  [bold]Type:[/bold]        {escape(str(msg.get('key_message_type', '')))}")
+                lines.append(f"  [bold]Explanation:[/bold] {escape(str(msg.get('explanation', '')))}")
+                sentences = msg.get("related_sentences", [])
+                if len(sentences) > 0:
+                    lines.append("  [bold]Sentences:[/bold]")
+                    for s in sentences:
+                        lines.append(f"    • {escape(str(s))}")
+                lines.append("")
+
+        console.print(Panel("\n".join(lines), title=f"[bold]Row {index}/{total}[/bold]"))
+
+        answer = input("[n]ext / [q]uit (n): ").strip().lower()
+        if answer == "q":
+            break
 
 
 def sample_contributions() -> None:
@@ -498,7 +560,7 @@ def fetch_contributions() -> None:
     console.print(f"[green]Contributions saved to {CONTRIBUTIONS_PATH}[/green]")
 
 
-MENU_OPTIONS = {"1", "2", "3", "4", "q"}
+MENU_OPTIONS = {"1", "2", "3", "4", "5", "q"}
 
 
 def run_menu() -> str:
@@ -507,17 +569,17 @@ def run_menu() -> str:
     Loops until the user enters a valid option, re-prompting on bad input.
 
     Returns:
-        The selected option, one of "1", "2", "3", "4", or "q".
+        The selected option, one of "1", "2", "3", "4", "5", or "q".
     """
     while True:
         console.print(Panel(
-            "[bold]1[/bold] — Fetch contributions\n[bold]2[/bold] — Run stance detection\n[bold]3[/bold] — Sample contributions\n[bold]4[/bold] — Extract key messages\n[bold]q[/bold] — Quit",
+            "[bold]1[/bold] — Fetch contributions\n[bold]2[/bold] — Run stance detection\n[bold]3[/bold] — Sample contributions\n[bold]4[/bold] — Extract key messages\n[bold]5[/bold] — Inspect key messages\n[bold]q[/bold] — Quit",
             title="[bold cyan]DIPAS Analysis[/bold cyan]",
         ))
         choice = input("Select option: ").strip().lower()
         if choice in MENU_OPTIONS:
             return choice
-        console.print("[red]Invalid choice — enter 1, 2, 3, 4, or q.[/red]")
+        console.print("[red]Invalid choice — enter 1, 2, 3, 4, 5, or q.[/red]")
 
 
 def main() -> None:
@@ -539,6 +601,8 @@ def main() -> None:
         # run_key_message_extraction is a coroutine driven by asyncio.run() from
         # this synchronous entry point.
         asyncio.run(run_key_message_extraction())
+    elif choice == "5":
+        inspect_key_messages()
     else:
         console.print("[yellow]Goodbye.[/yellow]")
 

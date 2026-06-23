@@ -6,8 +6,8 @@ import asyncio
 
 # ── Configuration ──────────────────────────────────────────────────
 
-MAX_TOKENS = 8000
-THINKING_BUDGET = 6000
+MAX_TOKENS = 20000
+THINKING_BUDGET = 8000
 RATE_LIMIT_DELAY = 0.5
 
 STANCE_LABEL_MAP = {
@@ -164,7 +164,12 @@ class LLMHandler:
                         "Authorization": f"Bearer {api_key}",
                     },
                     json=body,
-                    timeout=120.0,
+                    # Structured split timeout (replaces the former flat 120.0s):
+                    # a short connect (10s) fails fast on an unreachable server,
+                    # while a long read (600s) tolerates slow LLM generation; write
+                    # (30s) covers uploading the request body and pool (10s) bounds
+                    # the wait for a free connection from the pool.
+                    timeout=httpx.Timeout(connect=10.0, read=600.0, write=30.0, pool=10.0),
                 )
                 response.raise_for_status()
 

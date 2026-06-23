@@ -787,3 +787,143 @@ def test_run_key_message_extraction_skips_on_overwrite_decline(
 
     assert pd.read_parquet(output).equals(original)
     assert fresh_extractor.extract_calls == []
+
+
+# --- inspect key messages ---
+
+
+def _make_key_message(text="km"):
+    """Return a single valid key-message dict for inspection tests."""
+    return {
+        "key_message": text,
+        "key_message_type": "Vorschlag",
+        "related_sentences": ["s1", "s2"],
+        "explanation": "why",
+    }
+
+
+def test_run_menu_returns_5(monkeypatch):
+    """run_menu returns "5" when the user selects option 5."""
+    monkeypatch.setattr("builtins.input", lambda *a: "5")
+    assert main.run_menu() == "5"
+
+
+def test_main_dispatches_to_inspect(monkeypatch):
+    """main routes choice "5" to inspect_key_messages."""
+    monkeypatch.setattr(main, "run_menu", lambda: "5")
+    called = {"inspect": False}
+    monkeypatch.setattr(
+        main, "inspect_key_messages", lambda: called.__setitem__("inspect", True)
+    )
+    main.main()
+    assert called["inspect"] is True
+
+
+def test_inspect_aborts_without_files(monkeypatch, tmp_paths):
+    """inspect_key_messages returns cleanly (no input) when no files exist."""
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr("builtins.input", lambda *a: pytest.fail("no input expected"))
+
+    main.inspect_key_messages()
+
+
+def test_inspect_missing_key_messages_column(monkeypatch, tmp_paths):
+    """inspect_key_messages aborts when the source lacks key_messages."""
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    source = data_dir / "input.parquet"
+    pd.DataFrame({"contributionContent": ["hello"]}).to_parquet(source)
+
+    monkeypatch.setattr("builtins.input", lambda *a: "1")
+
+    main.inspect_key_messages()
+
+
+def test_inspect_missing_contribution_column(monkeypatch, tmp_paths):
+    """inspect_key_messages aborts when the source lacks contributionContent."""
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    source = data_dir / "input.parquet"
+    df = pd.DataFrame({"key_messages": [[_make_key_message()]]})
+    df.to_parquet(source)
+
+    monkeypatch.setattr("builtins.input", lambda *a: "1")
+
+    main.inspect_key_messages()
+
+
+def test_inspect_happy_path_quit(monkeypatch, tmp_paths):
+    """inspect_key_messages renders a row then quits on "q"."""
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    source = data_dir / "input.parquet"
+    df = pd.DataFrame(
+        {
+            "contributionContent": ["hello"],
+            "key_messages": [[_make_key_message()]],
+        }
+    )
+    df.to_parquet(source)
+
+    answers = iter(["1", "q"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+
+    main.inspect_key_messages()
+
+
+def test_inspect_next_advances(monkeypatch, tmp_paths):
+    """inspect_key_messages advances to the next row on "n"."""
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    source = data_dir / "input.parquet"
+    df = pd.DataFrame(
+        {
+            "contributionContent": ["hello", "world"],
+            "key_messages": [[_make_key_message("a")], [_make_key_message("b")]],
+        }
+    )
+    df.to_parquet(source)
+
+    answers = iter(["1", "n", "q"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+
+    main.inspect_key_messages()
+
+
+def test_inspect_handles_failed_row(monkeypatch, tmp_paths):
+    """inspect_key_messages renders FAILED for a None key_messages cell."""
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    source = data_dir / "input.parquet"
+    df = pd.DataFrame(
+        {
+            "contributionContent": ["hello"],
+            "key_messages": pd.Series([None], dtype="object"),
+        }
+    )
+    df.to_parquet(source)
+
+    answers = iter(["1", "n"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+
+    main.inspect_key_messages()
+
+
+def test_inspect_handles_nan_contribution(monkeypatch, tmp_paths):
+    """inspect_key_messages does not crash on a NaN contribution cell."""
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    source = data_dir / "input.parquet"
+    df = pd.DataFrame(
+        {
+            "contributionContent": pd.Series([None], dtype="object"),
+            "key_messages": [[_make_key_message()]],
+        }
+    )
+    df.to_parquet(source)
+
+    answers = iter(["1", "n"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+
+    main.inspect_key_messages()
