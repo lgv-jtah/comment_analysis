@@ -11,6 +11,7 @@ from rich.panel import Panel
 from create_dataset import CreateDataset
 import pandas as pd
 from sample_contributions import SampleContributions
+from key_message_extractor import KeyMessageExtraction
 
 console = Console()
 
@@ -18,6 +19,11 @@ console = Console()
 # which directory the app is launched from.
 DATA_DIR = Path(__file__).resolve().parent / "data"
 CONTRIBUTIONS_PATH = DATA_DIR / "contributions.parquet"
+
+# LLM endpoint configuration, shared by stance detection and key-message
+# extraction. Kept at module level so both flows reference the same values.
+LLM_BASE_URL = "http://217.160.202.33:5555/v1"
+LLM_MODEL_NAME = "Qwen/Qwen3.5-27B-FP8"
 
 # Fast-path gate thresholds (see general_reaction_gate_konzept.md, Task 1.3).
 # NOTE: 0.6 is an interim placeholder, NOT a tuned production value. The
@@ -120,9 +126,9 @@ async def run_stance_detection():
         "./prompts/config.json", prompt_key
     )
 
-    base_url = "http://217.160.202.33:5555/v1"
+    base_url = LLM_BASE_URL
     # base_url = "http://10.200.160.182:5555/v1"
-    model_name = "Qwen/Qwen3.5-27B-FP8"
+    model_name = LLM_MODEL_NAME
 
     fast_path_count = 0
     ensemble_count = 0
@@ -312,6 +318,118 @@ def _prompt_project_ids(available_ids: list[str]) -> list[str]:
         console.print("[red]Please enter at least one project ID.[/red]")
 
 
+def _pick_parquet_file(data_dir: Path) -> Path | None:
+    """Prompt the user to choose a parquet file from a directory.
+
+    Lists every ``*.parquet`` file in ``data_dir`` as a numbered (1-based) menu
+    and reads a selection, re-prompting on non-integer or out-of-range input.
+
+    Args:
+        data_dir: Directory to scan for ``*.parquet`` files.
+
+    Returns:
+        The chosen file's :class:`~pathlib.Path`, or ``None`` if the directory
+        does not exist or contains no parquet files.
+    """
+    if not data_dir.exists():
+        console.print(f"[red]No data directory found at {data_dir}.[/red]")
+        return None
+
+    files = sorted(data_dir.glob("*.parquet"))
+    if not files:
+        console.print(f"[red]No parquet files found in {data_dir}.[/red]")
+        return None
+
+    for number, file in enumerate(files, start=1):
+        # file.name is a filesystem name, not model output, but printing it as a
+        # separate argument keeps any stray rich-markup characters literal.
+        console.print(f"  {number}.", file.name)
+
+    while True:
+        raw = input("Select a file by number: ").strip()
+        try:
+            choice = int(raw)
+        except ValueError:
+            console.print("[red]Please enter a whole number.[/red]")
+            continue
+        if not 1 <= choice <= len(files):
+            console.print(f"[red]Please enter a number between 1 and {len(files)}.[/red]")
+            continue
+        return files[choice - 1]
+
+
+def _prompt_proceeding_description() -> str:
+    """Prompt for an optional proceeding description used as LLM context.
+
+    Returns:
+        The entered description with surrounding whitespace stripped, or an empty
+        string if the user left it blank.
+    """
+    description = input("Proceeding description (context, may be empty): ").strip()
+    if not description:
+        console.print("[yellow]No proceeding description given — continuing without context.[/yellow]")
+        return ""
+    return description
+
+
+async def run_key_message_extraction() -> None:
+    """Extract key messages from a chosen parquet file of contributions.
+
+    Prompts the user to pick a source parquet file, validates that it contains a
+    ``contributionContent`` column, then runs :class:`KeyMessageExtraction` over
+    every row (serialized via a semaphore of 1) and writes a new parquet file. A
+    single ``key_messages`` column is added: each cell holds the list of
+    key-message dicts extracted for that row (or ``None`` if extraction failed) —
+    not the former three separate ``key_message`` / ``key_message_type`` /
+    ``explanation`` columns. Aborts early if no file is selected, the column is
+    missing, or the user declines to overwrite an existing output.
+    """
+    source_path = _pick_parquet_file(DATA_DIR)
+    if source_path is None:
+        return
+
+    df = pd.read_parquet(source_path)
+    if "contributionContent" not in df.columns:
+        console.print("[red]Selected file is missing the 'contributionContent' column.[/red]")
+        return
+
+    description = _prompt_proceeding_description()
+
+    output_path = DATA_DIR / f"key_messages_{source_path.stem}.parquet"
+    if output_path.exists() and not _prompt_overwrite(output_path):
+        console.print("[yellow]Skipping extraction — existing file kept.[/yellow]")
+        return
+
+    extractor = KeyMessageExtraction(base_url=LLM_BASE_URL, model_name=LLM_MODEL_NAME)
+    semaphore = asyncio.Semaphore(1)
+
+    key_messages_col: list[list[dict] | None] = []
+
+    total = len(df)
+    async with httpx.AsyncClient() as client:
+        for index, (_, row) in enumerate(df.iterrows(), start=1):
+            # Treat missing content as an empty string so a NaN cell does not
+            # crash the extractor; the LLM simply receives no contribution text.
+            contribution = "" if pd.isna(row["contributionContent"]) else str(row["contributionContent"])
+            result = await extractor.extract(
+                client=client,
+                contribution=contribution,
+                proceeding_description=description,
+                semaphore=semaphore,
+            )
+            if result is not None:
+                key_messages_col.append(result)
+                console.print(f"[{index}/{total}] {len(result)} key messages found")
+            else:
+                key_messages_col.append(None)
+                console.print(f"[red][{index}/{total}] FAILED[/red]")
+
+    result_df = df.copy()
+    result_df["key_messages"] = key_messages_col
+    result_df.to_parquet(output_path)
+    console.print(f"[green]Key messages saved to {output_path}[/green]")
+
+
 def sample_contributions() -> None:
     """Draw a random sample of contributions for chosen projects.
 
@@ -380,7 +498,7 @@ def fetch_contributions() -> None:
     console.print(f"[green]Contributions saved to {CONTRIBUTIONS_PATH}[/green]")
 
 
-MENU_OPTIONS = {"1", "2", "3", "q"}
+MENU_OPTIONS = {"1", "2", "3", "4", "q"}
 
 
 def run_menu() -> str:
@@ -389,17 +507,17 @@ def run_menu() -> str:
     Loops until the user enters a valid option, re-prompting on bad input.
 
     Returns:
-        The selected option, one of "1", "2", "3", or "q".
+        The selected option, one of "1", "2", "3", "4", or "q".
     """
     while True:
         console.print(Panel(
-            "[bold]1[/bold] — Fetch contributions\n[bold]2[/bold] — Run stance detection\n[bold]3[/bold] — Sample contributions\n[bold]q[/bold] — Quit",
+            "[bold]1[/bold] — Fetch contributions\n[bold]2[/bold] — Run stance detection\n[bold]3[/bold] — Sample contributions\n[bold]4[/bold] — Extract key messages\n[bold]q[/bold] — Quit",
             title="[bold cyan]DIPAS Analysis[/bold cyan]",
         ))
         choice = input("Select option: ").strip().lower()
         if choice in MENU_OPTIONS:
             return choice
-        console.print("[red]Invalid choice — enter 1, 2, 3, or q.[/red]")
+        console.print("[red]Invalid choice — enter 1, 2, 3, 4, or q.[/red]")
 
 
 def main() -> None:
@@ -417,6 +535,10 @@ def main() -> None:
         asyncio.run(run_stance_detection())
     elif choice == "3":
         sample_contributions()
+    elif choice == "4":
+        # run_key_message_extraction is a coroutine driven by asyncio.run() from
+        # this synchronous entry point.
+        asyncio.run(run_key_message_extraction())
     else:
         console.print("[yellow]Goodbye.[/yellow]")
 

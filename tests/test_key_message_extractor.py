@@ -9,7 +9,7 @@ library.
 import asyncio
 
 from key_message_extractor import KeyMessageExtraction
-from llm_handler import KeyMessage
+from llm_handler import KeyMessageList
 from stance_detector import StanceDetector
 
 
@@ -19,12 +19,17 @@ def _make_extractor():
 
 
 def test_extract_happy_path(monkeypatch):
-    """extract() returns the parsed dict produced by the LLM call."""
+    """extract() returns the list of key-message dicts from the LLM response."""
     extractor = _make_extractor()
     canned_result = {
-        "key_message": "Mehr Bäume pflanzen",
-        "key_message_type": "Vorschlag",
-        "key_message_explanation": "Der Bürger schlägt vor...",
+        "key_messages": [
+            {
+                "key_message": "Mehr Bäume pflanzen",
+                "key_message_type": "Wunsch",
+                "related_sentences": ["Wir brauchen mehr Bäume."],
+                "explanation": "Der Bürger schlägt vor...",
+            }
+        ]
     }
 
     async def fake_call_model(**kwargs):
@@ -37,7 +42,7 @@ def test_extract_happy_path(monkeypatch):
     result = asyncio.run(
         extractor.extract(client, "Wir brauchen mehr Bäume.", "Stadtpark Planung", semaphore)
     )
-    assert result == canned_result
+    assert result == canned_result["key_messages"]
 
 
 def test_extract_returns_none_when_llm_fails(monkeypatch):
@@ -76,7 +81,7 @@ def test_extract_substitutes_template_variables(monkeypatch):
     content = captured["messages"][0]["content"]
     assert contribution in content
     assert proceeding in content
-    assert captured["response_schema"] is KeyMessage
+    assert captured["response_schema"] is KeyMessageList
 
 
 def test_prompt_loaded_once_at_init(monkeypatch):
@@ -108,11 +113,11 @@ def test_prompt_loaded_once_at_init(monkeypatch):
 def test_system_prompt_content():
     """The loaded system prompt contains the expected domain keyword."""
     extractor = _make_extractor()
-    assert "Bürgerbeteiligungsverfahren" in extractor._prompt_config["system"]
+    assert "Stadtplanung" in extractor._prompt_config["system"]
 
 
 def test_response_schema_is_keymessage(monkeypatch):
-    """extract() passes the KeyMessage schema through to the LLM call."""
+    """extract() passes the KeyMessageList schema through to the LLM call."""
     extractor = _make_extractor()
     captured = {}
 
@@ -124,4 +129,4 @@ def test_response_schema_is_keymessage(monkeypatch):
 
     semaphore = asyncio.Semaphore(1)
     asyncio.run(extractor.extract(None, "Beitrag", "Verfahren", semaphore))
-    assert captured["response_schema"] is KeyMessage
+    assert captured["response_schema"] is KeyMessageList

@@ -49,11 +49,34 @@ class Stance(BaseModel):
     explanation: str
 
 class KeyMessage(BaseModel):
-    """Schema for a key-message extraction result returned by the model."""
+    """Schema for a single key-message extraction result returned by the model.
+
+    Attributes:
+        key_message: The distilled key message extracted from the contribution.
+        key_message_type: The category/type of the key message (e.g. a wish or
+            proposal).
+        related_sentences: The verbatim source sentences the key message was
+            derived from.
+        explanation: Free-form natural-language justification for the extraction.
+    """
 
     key_message: str
     key_message_type: str
-    key_message_explanation: str
+    related_sentences: list[str]
+    explanation: str
+
+class KeyMessageList(BaseModel):
+    """Schema wrapping the list of key messages extracted from one contribution.
+
+    A single contribution can yield several key messages, so the model returns a
+    list rather than a single object. This wrapper exists because the structured-
+    output JSON schema must have an object at its root, not a bare array.
+
+    Attributes:
+        key_messages: All key messages extracted from one contribution.
+    """
+
+    key_messages: list[KeyMessage]
 
 class LLMHandler:
     """Wraps calls to an OpenAI-compatible (vLLM) chat completions endpoint."""

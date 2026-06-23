@@ -247,6 +247,118 @@ def test_main_quits(monkeypatch):
     main.main()
 
 
+# --- run_stance_detection ---
+
+
+class FakeStanceDetector:
+    """Network-free stand-in for ``stance_detector.StanceDetector``."""
+
+    data = []
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def load_data(self):
+        return type(self).data
+
+    def load_prompt_config(self, path, key):
+        return {"key": key}
+
+    def format_gr_hint(self, score):
+        return f"hint:{score}"
+
+    def build_messages(self, *, prompt_config, item, gr_hint=None):
+        return "system", [{"role": "user", "content": item.get("comment_text", "")}]
+
+
+class FakeLLMHandler:
+    """Network-free stand-in for ``llm_handler.LLMHandler``.
+
+    ``call_results`` is consumed one entry per call so a test can return a real
+    result for one branch and ``None`` for another to exercise both print paths.
+    """
+
+    call_results = []
+    call_index = 0
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def call_model(self, **kwargs):
+        cls = type(self)
+        result = cls.call_results[cls.call_index]
+        cls.call_index += 1
+        return result
+
+
+class FakeEvaluator:
+    """Network-free stand-in for ``evaluator.StanceEvaluator``."""
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def evaluate(self, predictions):
+        return {"predictions": predictions}
+
+    def format_report(self, report):
+        return "report-text"
+
+
+def test_run_stance_detection_runs_all_three_paths(monkeypatch, tmp_path):
+    """run_stance_detection routes rows through fast-path, ensemble, and LLM branches."""
+    import asyncio
+
+    # Three rows: one fast-path (short, confident "ja"), one ensemble (long,
+    # confident "ja"), one plain LLM (label not "ja"). The ensemble call returns
+    # a real result; the LLM call returns None to cover the FAILED print branch.
+    FakeStanceDetector.data = [
+        {
+            "row_index": 1,
+            "comment_text": "ja gut",
+            "general_reaction_label": "ja",
+            "general_reaction_score": 0.99,
+            "gold_stance": "neutral",
+        },
+        {
+            "row_index": 2,
+            "comment_text": "this is a much longer comment that exceeds the word limit easily",
+            "general_reaction_label": "ja",
+            "general_reaction_score": 0.99,
+            "gold_stance": "pro",
+        },
+        {
+            "row_index": 3,
+            "comment_text": "neutral text here",
+            "general_reaction_label": "nein",
+            "general_reaction_score": 0.1,
+            "gold_stance": "contra",
+        },
+    ]
+    monkeypatch.setattr(main, "StanceDetector", FakeStanceDetector)
+    monkeypatch.setattr(main, "LLMHandler", FakeLLMHandler)
+    monkeypatch.setattr(main, "StanceEvaluator", FakeEvaluator)
+    monkeypatch.setattr(
+        main, "write_markdown_report", lambda report, metadata: tmp_path / "report.md"
+    )
+    monkeypatch.setattr(
+        main, "write_result_json", lambda data, predictions: tmp_path / "result.json"
+    )
+
+    # First run: ensemble succeeds, LLM fails — covers the ensemble success and
+    # LLM FAILED print branches.
+    FakeLLMHandler.call_results = [{"stance": "pro"}, None]
+    FakeLLMHandler.call_index = 0
+    asyncio.run(main.run_stance_detection())
+    assert FakeLLMHandler.call_index == 2
+
+    # Second run: ensemble fails, LLM succeeds — covers the ensemble FAILED and
+    # LLM success print branches.
+    FakeLLMHandler.call_results = [None, {"stance": "pro"}]
+    FakeLLMHandler.call_index = 0
+    asyncio.run(main.run_stance_detection())
+    assert FakeLLMHandler.call_index == 2
+
+
 # --- sample contributions ---
 
 
@@ -380,6 +492,23 @@ def test_sample_contributions_missing_file(
     assert fresh_sampler.sample_called is False
 
 
+def test_sample_contributions_missing_project_id_column(
+    monkeypatch, tmp_paths, fresh_sampler
+):
+    """sample_contributions aborts (no sampler) when the project_id column is absent."""
+    data_dir, contrib_path = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame({"other": [1, 2]}).to_parquet(contrib_path)
+
+    monkeypatch.setattr(main, "SampleContributions", fresh_sampler)
+    monkeypatch.setattr("builtins.input", lambda *a: pytest.fail("no input expected"))
+
+    main.sample_contributions()
+
+    assert fresh_sampler.init_args is None
+    assert fresh_sampler.sample_called is False
+
+
 def test_sample_contributions_catches_valueerror(
     monkeypatch, tmp_paths, fresh_sampler
 ):
@@ -414,3 +543,247 @@ def test_sample_contributions_catches_filenotfounderror(
     # Should not raise.
     main.sample_contributions()
     assert fresh_sampler.sample_called is True
+
+
+# --- key message extraction ---
+
+
+class FakeExtractor:
+    """Network-free stand-in for ``key_message_extractor.KeyMessageExtraction``.
+
+    Class-level attributes capture the constructor kwargs, record every
+    ``extract`` call's contribution, and let each test configure the returned
+    value (including ``None`` to simulate a failed extraction).
+    """
+
+    init_args = None
+    extract_return = [
+        {
+            "key_message": "km",
+            "key_message_type": "Vorschlag",
+            "related_sentences": ["s"],
+            "explanation": "why",
+        }
+    ]
+    extract_calls = []
+
+    def __init__(self, *args, **kwargs):
+        FakeExtractor.init_args = kwargs
+
+    async def extract(
+        self,
+        *,
+        client,
+        contribution,
+        proceeding_description,
+        semaphore,
+        enable_thinking=False,
+    ):
+        FakeExtractor.extract_calls.append(contribution)
+        return FakeExtractor.extract_return
+
+
+@pytest.fixture
+def fresh_extractor():
+    """Reset FakeExtractor class-level state and yield the class."""
+    FakeExtractor.init_args = None
+    FakeExtractor.extract_return = [
+        {
+            "key_message": "km",
+            "key_message_type": "Vorschlag",
+            "related_sentences": ["s"],
+            "explanation": "why",
+        }
+    ]
+    FakeExtractor.extract_calls = []
+    return FakeExtractor
+
+
+def test_run_menu_returns_4(monkeypatch):
+    """run_menu returns "4" when the user selects option 4."""
+    monkeypatch.setattr("builtins.input", lambda *a: "4")
+    assert main.run_menu() == "4"
+
+
+def test_main_dispatches_to_key_message_extraction(monkeypatch):
+    """main routes choice "4" to run_key_message_extraction via asyncio.run."""
+    monkeypatch.setattr(main, "run_menu", lambda: "4")
+    called = {"run": False}
+
+    async def fake_run():
+        called["run"] = True
+
+    monkeypatch.setattr(main, "run_key_message_extraction", fake_run)
+    main.main()
+    assert called["run"] is True
+
+
+def test_pick_parquet_file_returns_selection(monkeypatch, tmp_path):
+    """_pick_parquet_file returns the Path matching the entered index."""
+    first = tmp_path / "a.parquet"
+    second = tmp_path / "b.parquet"
+    pd.DataFrame({"x": [1]}).to_parquet(first)
+    pd.DataFrame({"x": [2]}).to_parquet(second)
+
+    files = sorted(tmp_path.glob("*.parquet"))
+    target = files[1]
+    index = str(files.index(target) + 1)
+    monkeypatch.setattr("builtins.input", lambda *a: index)
+
+    assert main._pick_parquet_file(tmp_path) == target
+
+
+def test_pick_parquet_file_reprompts_on_out_of_range(monkeypatch, tmp_path):
+    """_pick_parquet_file re-prompts on an out-of-range index then returns."""
+    only = tmp_path / "a.parquet"
+    pd.DataFrame({"x": [1]}).to_parquet(only)
+
+    answers = iter(["5", "1"])
+    calls = {"n": 0}
+
+    def fake_input(*a):
+        calls["n"] += 1
+        return next(answers)
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    assert main._pick_parquet_file(tmp_path) == only
+    assert calls["n"] == 2
+
+
+def test_pick_parquet_file_no_files(monkeypatch, tmp_path):
+    """_pick_parquet_file returns None without prompting when no files exist."""
+    missing = tmp_path / "does_not_exist"
+    monkeypatch.setattr("builtins.input", lambda *a: pytest.fail("no input expected"))
+    assert main._pick_parquet_file(missing) is None
+
+
+def test_run_key_message_extraction_aborts_without_files(
+    monkeypatch, tmp_paths, fresh_extractor
+):
+    """run_key_message_extraction aborts (no extractor) when no files exist."""
+    import asyncio
+
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(main, "KeyMessageExtraction", fresh_extractor)
+    monkeypatch.setattr("builtins.input", lambda *a: pytest.fail("no input expected"))
+
+    asyncio.run(main.run_key_message_extraction())
+
+    assert fresh_extractor.init_args is None
+    assert list(data_dir.glob("key_messages_*.parquet")) == []
+
+
+def test_run_key_message_extraction_happy_path(
+    monkeypatch, tmp_paths, fresh_extractor
+):
+    """run_key_message_extraction writes a parquet with the key_messages column."""
+    import asyncio
+
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    source = data_dir / "input.parquet"
+    pd.DataFrame({"contributionContent": ["hello", "world"]}).to_parquet(source)
+
+    monkeypatch.setattr(main, "KeyMessageExtraction", fresh_extractor)
+    answers = iter(["1", "some context"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+
+    asyncio.run(main.run_key_message_extraction())
+
+    output = data_dir / "key_messages_input.parquet"
+    assert output.exists()
+    written = pd.read_parquet(output)
+    assert "key_messages" in written.columns
+    assert [list(v) for v in written["key_messages"]] == [
+        fresh_extractor.extract_return,
+        fresh_extractor.extract_return,
+    ]
+    assert fresh_extractor.extract_calls == ["hello", "world"]
+
+
+def test_run_key_message_extraction_handles_none_result(
+    monkeypatch, tmp_paths, fresh_extractor
+):
+    """run_key_message_extraction stores None when extract returns None."""
+    import asyncio
+
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    source = data_dir / "input.parquet"
+    pd.DataFrame({"contributionContent": ["hello"]}).to_parquet(source)
+
+    fresh_extractor.extract_return = None
+    monkeypatch.setattr(main, "KeyMessageExtraction", fresh_extractor)
+    answers = iter(["1", ""])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+
+    asyncio.run(main.run_key_message_extraction())
+
+    output = data_dir / "key_messages_input.parquet"
+    written = pd.read_parquet(output)
+    assert written["key_messages"].isna().all()
+
+
+def test_run_key_message_extraction_aborts_on_missing_column(
+    monkeypatch, tmp_paths, fresh_extractor
+):
+    """run_key_message_extraction aborts (no extractor, no output) when the source lacks contributionContent."""
+    import asyncio
+
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    source = data_dir / "input.parquet"
+    pd.DataFrame({"other_col": [1, 2]}).to_parquet(source)
+
+    monkeypatch.setattr(main, "KeyMessageExtraction", fresh_extractor)
+    answers = iter(["1", ""])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+
+    asyncio.run(main.run_key_message_extraction())
+
+    assert fresh_extractor.init_args is None
+    assert list(data_dir.glob("key_messages_*.parquet")) == []
+
+
+def test_pick_parquet_file_reprompts_on_non_integer(monkeypatch, tmp_path):
+    """_pick_parquet_file re-prompts on non-integer input then returns the selection."""
+    only = tmp_path / "a.parquet"
+    pd.DataFrame({"x": [1]}).to_parquet(only)
+
+    calls = {"n": 0}
+    answers = iter(["abc", "1"])
+
+    def fake_input(*a):
+        calls["n"] += 1
+        return next(answers)
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    assert main._pick_parquet_file(tmp_path) == only
+    assert calls["n"] == 2
+
+
+def test_run_key_message_extraction_skips_on_overwrite_decline(
+    monkeypatch, tmp_paths, fresh_extractor
+):
+    """run_key_message_extraction leaves output untouched and never extracts on decline."""
+    import asyncio
+
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    source = data_dir / "input.parquet"
+    pd.DataFrame({"contributionContent": ["hello"]}).to_parquet(source)
+
+    output = data_dir / "key_messages_input.parquet"
+    original = pd.DataFrame({"keep": [1]})
+    original.to_parquet(output)
+
+    monkeypatch.setattr(main, "KeyMessageExtraction", fresh_extractor)
+    # File selection "1", then "n" to decline the overwrite prompt.
+    answers = iter(["1", "", "n"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+
+    asyncio.run(main.run_key_message_extraction())
+
+    assert pd.read_parquet(output).equals(original)
+    assert fresh_extractor.extract_calls == []

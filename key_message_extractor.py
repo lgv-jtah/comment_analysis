@@ -6,7 +6,7 @@ from string import Template
 
 import httpx
 
-from llm_handler import LLMHandler, KeyMessage
+from llm_handler import LLMHandler, KeyMessageList
 from stance_detector import StanceDetector
 
 DEFAULT_PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
@@ -43,8 +43,8 @@ class KeyMessageExtraction:
         proceeding_description: str,
         semaphore: asyncio.Semaphore,
         enable_thinking: bool = False,
-    ) -> dict | None:
-        """Extract a key message from a contribution.
+    ) -> list[dict] | None:
+        """Extract the key messages from a contribution.
 
         Args:
             client: Async HTTP client for the LLM request.
@@ -54,8 +54,9 @@ class KeyMessageExtraction:
             enable_thinking: If True, request the model's thinking mode.
 
         Returns:
-            Dict with keys key_message, key_message_type, key_message_explanation,
-            or None if the LLM call fails or the response cannot be parsed.
+            A list of key-message dicts, each with keys ``key_message``,
+            ``key_message_type``, ``related_sentences``, and ``explanation``; or
+            ``None`` if the LLM call fails or the response cannot be parsed.
             Returned strings are verbatim model output — do not treat as safe HTML/SQL.
         """
         # safe_substitute (not substitute) is used so that any stray "$" in the
@@ -68,7 +69,7 @@ class KeyMessageExtraction:
         system = self._prompt_config["system"]
         messages = [{"role": "user", "content": user_content}]
 
-        return await self._llm_handler.call_model(
+        raw = await self._llm_handler.call_model(
             client=client,
             base_url=self.base_url,
             model_name=self.model_name,
@@ -76,5 +77,8 @@ class KeyMessageExtraction:
             messages=messages,
             semaphore=semaphore,
             enable_thinking=enable_thinking,
-            response_schema=KeyMessage,
+            response_schema=KeyMessageList,
         )
+        if raw is None:
+            return None
+        return raw.get("key_messages")
