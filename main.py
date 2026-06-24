@@ -5,15 +5,18 @@ from evaluator import StanceEvaluator, RunMetadata, write_markdown_report, write
 import httpx
 import asyncio
 import time
+import urllib.parse
+import requests
 import numpy as np
 from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 from rich.markup import escape
-from create_dataset import CreateDataset
+from create_dataset import CreateDataset, API_URL
 import pandas as pd
 from sample_contributions import SampleContributions
 from key_message_extractor import KeyMessageExtraction
+from comment_fetcher import CommentFetcher
 
 console = Console()
 
@@ -25,8 +28,10 @@ CONTRIBUTIONS_PATH = DATA_DIR / "contributions.parquet"
 # LLM endpoint configuration, shared by stance detection and key-message
 # extraction. Kept at module level so both flows reference the same values.
 # LLM_BASE_URL = "http://217.160.202.33:5555/v1"
-LLM_BASE_URL = "http://10.200.160.182:5555/v1"
-LLM_MODEL_NAME = "Qwen/Qwen3.5-27B-FP8"
+# LLM_BASE_URL = "http://10.200.160.182:5555/v1"
+LLM_BASE_URL = "https://api.lyceum.technology/api/v2/external/serverless"
+# LLM_MODEL_NAME = "Qwen/Qwen3.5-27B-FP8"
+LLM_MODEL_NAME = "Qwen/Qwen3-32B"
 
 # Fast-path gate thresholds (see general_reaction_gate_konzept.md, Task 1.3).
 # NOTE: 0.6 is an interim placeholder, NOT a tuned production value. The
@@ -560,7 +565,119 @@ def fetch_contributions() -> None:
     console.print(f"[green]Contributions saved to {CONTRIBUTIONS_PATH}[/green]")
 
 
-MENU_OPTIONS = {"1", "2", "3", "4", "5", "q"}
+def get_contribution_with_comments(contribution_id: int | None = None) -> dict | None:
+    """Fetch a contribution and its related comments.
+
+    When contribution_id is provided, looks up the project from the local
+    contributions parquet, fetches all contributions for that project from the
+    PDS API, and finds the matching contribution. When contribution_id is None,
+    picks a random row from the parquet directly without an API call.
+    In both cases, fetches comments for the contribution from the database.
+
+    Args:
+        contribution_id: The integer ID of the contribution to fetch, or None
+            to pick one at random from the local contributions file.
+
+    Returns:
+        A dict with keys "contribution" (dict) and "comments" (list[dict]),
+        or None if any step fails.
+    """
+    if not CONTRIBUTIONS_PATH.exists():
+        console.print(f"[red]No contributions file found at {CONTRIBUTIONS_PATH}. Run option 1 (Fetch contributions) first.[/red]")
+        return None
+
+    df = pd.read_parquet(CONTRIBUTIONS_PATH)
+
+    if "id" not in df.columns:
+        console.print("[red]Contributions file is missing the 'id' column.[/red]")
+        return None
+
+    if contribution_id is None:
+        if df.empty:
+            console.print("[red]Contributions file is empty.[/red]")
+            return None
+        row = df.sample(n=1).iloc[0]
+        # Parquet yields numpy.int64 which CommentFetcher rejects; cast to native int.
+        contribution_id = int(row["id"])
+        project_id = row["project_id"]
+        contribution = {
+            "project_id": project_id,
+            "id": contribution_id,
+            "title": None if pd.isna(row["title"]) else str(row["title"]),
+            "contributionContent": None if pd.isna(row["contributionContent"]) else str(row["contributionContent"]),
+            "category": None if pd.isna(row["category"]) else str(row["category"]),
+        }
+        console.print(f"[bold]Randomly picked contribution {contribution_id} from project {project_id}[/bold]")
+    else:
+        matches = df[df["id"] == contribution_id]
+        if matches.empty:
+            console.print(f"[red]Contribution {contribution_id} not found in {CONTRIBUTIONS_PATH}.[/red]")
+            return None
+        project_id = matches.iloc[0]["project_id"]
+        # Percent-encode project_id so it can't inject extra path segments into the URL.
+        url = f"{API_URL}{urllib.parse.quote(str(project_id), safe='')}/contributions/"
+        console.print(f"[bold]Fetching contributions for project {project_id}...[/bold]")
+        try:
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+        except (requests.RequestException, ValueError) as e:
+            console.print(f"[red]API request failed: {e}[/red]")
+            return None
+        contribution = None
+        for feature in data.get("features", []):
+            props = feature.get("properties", {})
+            if props.get("id") == contribution_id:
+                contribution = {
+                    "project_id": project_id,
+                    # Normalize to native int in case the API client returns numpy.int64.
+                    "id": int(props["id"]),
+                    "title": props.get("title"),
+                    "contributionContent": props.get("contributionContent"),
+                    "category": props.get("category"),
+                }
+                break
+        if contribution is None:
+            console.print(f"[yellow]Contribution {contribution_id} not returned by the API.[/yellow]")
+            return None
+
+    fetcher = CommentFetcher()
+    try:
+        # contribution_id may be numpy.int64 here; CommentFetcher requires a native int.
+        comments = fetcher.get_comments(int(contribution_id))
+    except Exception as e:
+        console.print(f"[red]Failed to fetch comments: {e}[/red]")
+        return None
+    finally:
+        # Release the DB engine even if get_comments raised, to avoid leaking connections.
+        fetcher.close()
+
+    if not comments:
+        console.print(f"[yellow]No comments found for contribution {contribution_id}.[/yellow]")
+
+    console.print(Panel(
+        f"[bold]Title:[/bold] {escape(str(contribution.get('title') or ''))}\n"
+        f"[bold]Comments:[/bold] {len(comments)}",
+        title=f"[bold cyan]Contribution {contribution_id}[/bold cyan]",
+    ))
+    return {"contribution": contribution, "comments": comments}
+
+
+def run_get_contribution_with_comments() -> None:
+    """Prompt for an optional contribution ID and run the fetch+comments flow."""
+    raw = input("Contribution ID (blank for random): ").strip()
+    if raw == "":
+        get_contribution_with_comments(None)
+    else:
+        try:
+            cid = int(raw)
+        except ValueError:
+            console.print("[red]Invalid contribution ID — please enter a whole number.[/red]")
+            return
+        get_contribution_with_comments(cid)
+
+
+MENU_OPTIONS = {"1", "2", "3", "4", "5", "6", "q"}
 
 
 def run_menu() -> str:
@@ -569,17 +686,17 @@ def run_menu() -> str:
     Loops until the user enters a valid option, re-prompting on bad input.
 
     Returns:
-        The selected option, one of "1", "2", "3", "4", "5", or "q".
+        The selected option, one of "1", "2", "3", "4", "5", "6", or "q".
     """
     while True:
         console.print(Panel(
-            "[bold]1[/bold] — Fetch contributions\n[bold]2[/bold] — Run stance detection\n[bold]3[/bold] — Sample contributions\n[bold]4[/bold] — Extract key messages\n[bold]5[/bold] — Inspect key messages\n[bold]q[/bold] — Quit",
+            "[bold]1[/bold] — Fetch contributions\n[bold]2[/bold] — Run stance detection\n[bold]3[/bold] — Sample contributions\n[bold]4[/bold] — Extract key messages\n[bold]5[/bold] — Inspect key messages\n[bold]6[/bold] — Fetch contribution with comments\n[bold]q[/bold] — Quit",
             title="[bold cyan]DIPAS Analysis[/bold cyan]",
         ))
         choice = input("Select option: ").strip().lower()
         if choice in MENU_OPTIONS:
             return choice
-        console.print("[red]Invalid choice — enter 1, 2, 3, 4, 5, or q.[/red]")
+        console.print("[red]Invalid choice — enter 1, 2, 3, 4, 5, 6, or q.[/red]")
 
 
 def main() -> None:
@@ -603,6 +720,8 @@ def main() -> None:
         asyncio.run(run_key_message_extraction())
     elif choice == "5":
         inspect_key_messages()
+    elif choice == "6":
+        run_get_contribution_with_comments()
     else:
         console.print("[yellow]Goodbye.[/yellow]")
 
