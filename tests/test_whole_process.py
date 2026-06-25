@@ -115,8 +115,8 @@ def test_should_ensemble_path_short():
 def test_run_flattens_rows(monkeypatch):
     """Two key messages x two comments yields four flattened rows."""
     km_list = [
-        {"key_message": "km1", "key_message_type": "Wunsch"},
-        {"key_message": "km2", "key_message_type": "Kritik"},
+        {"key_message": "km1", "key_message_type": "Wunsch", "explanation": "km expl 1"},
+        {"key_message": "km2", "key_message_type": "Kritik", "explanation": "km expl 2"},
     ]
     processor = _make_processor(monkeypatch, km_list)
     df = pd.DataFrame(
@@ -134,6 +134,8 @@ def test_run_flattens_rows(monkeypatch):
     assert set(result["contribution_id"]) == {7}
     assert set(result["key_message"]) == {"km1", "km2"}
     assert set(result["comment_text"]) == {"c1", "c2"}
+    assert set(result["contributionContent"]) == {"Beitrag"}
+    assert set(result["key_message_explanation"]) == {"km expl 1", "km expl 2"}
 
 
 def test_run_fast_path_no_llm_call(monkeypatch):
@@ -146,7 +148,7 @@ def test_run_fast_path_no_llm_call(monkeypatch):
         called["hit"] = True
         return {"stance": "x", "explanation": "y"}
 
-    km_list = [{"key_message": "km1", "key_message_type": "t"}]
+    km_list = [{"key_message": "km1", "key_message_type": "t", "explanation": "km expl"}]
     processor = _make_processor(
         monkeypatch, km_list, classifier=classifier, call_model=call_model
     )
@@ -163,6 +165,8 @@ def test_run_fast_path_no_llm_call(monkeypatch):
     assert called["hit"] is False
     assert result.iloc[0]["stance"] == "neutral"
     assert result.iloc[0]["explanation"] == FAST_PATH_EXPLANATION
+    assert result.iloc[0]["contributionContent"] == "Beitrag"
+    assert result.iloc[0]["key_message_explanation"] == "km expl"
 
 
 def test_run_ensemble_hint_present(monkeypatch):
@@ -175,7 +179,7 @@ def test_run_ensemble_hint_present(monkeypatch):
         captured.update(kwargs)
         return {"stance": "in favor", "explanation": "reason"}
 
-    km_list = [{"key_message": "km1", "key_message_type": "t"}]
+    km_list = [{"key_message": "km1", "key_message_type": "t", "explanation": "km expl"}]
     processor = _make_processor(
         monkeypatch, km_list, classifier=classifier, call_model=call_model
     )
@@ -196,7 +200,7 @@ def test_run_ensemble_hint_present(monkeypatch):
 
 def test_run_llm_path_default(monkeypatch):
     """The default nein/0.5 classifier routes to the LLM, using its stance."""
-    km_list = [{"key_message": "km1", "key_message_type": "t"}]
+    km_list = [{"key_message": "km1", "key_message_type": "t", "explanation": "km expl"}]
     captured = {"hit": False}
 
     async def call_model(**kwargs):
@@ -217,6 +221,8 @@ def test_run_llm_path_default(monkeypatch):
     assert captured["hit"] is True
     assert result.iloc[0]["stance"] == "in favor"
     assert result.iloc[0]["explanation"] == "test reason"
+    assert result.iloc[0]["contributionContent"] == "Beitrag"
+    assert result.iloc[0]["key_message_explanation"] == "km expl"
 
 
 def test_run_skips_when_extract_returns_none(monkeypatch):
@@ -254,7 +260,7 @@ def test_run_skips_when_extract_returns_empty(monkeypatch):
 
 def test_run_stance_none_writes_row(monkeypatch):
     """When the LLM call returns None the row is still written with stance None."""
-    km_list = [{"key_message": "km1", "key_message_type": "t"}]
+    km_list = [{"key_message": "km1", "key_message_type": "t", "explanation": "km expl"}]
 
     async def call_model(**kwargs):
         return None

@@ -37,8 +37,10 @@ FAST_PATH_EXPLANATION = "Allgemeine positive Reaktion — per KM neutral, Kommen
 
 OUTPUT_COLUMNS = [
     "contribution_id",
+    "contributionContent",
     "key_message",
     "key_message_type",
+    "key_message_explanation",
     "comment_text",
     "stance",
     "explanation",
@@ -210,7 +212,10 @@ class WholeProcess:
 
         Returns:
             A DataFrame with :data:`OUTPUT_COLUMNS`; empty if no rows are
-            produced.
+            produced. Each row carries the source contribution text in
+            ``contributionContent`` and the key-message rationale in
+            ``key_message_explanation``, alongside the contribution id, key
+            message, key-message type, comment, stance, and stance explanation.
         """
         # Lazy load: defer the expensive BERT model load until run time.
         self._classifier.load_classifier(str(self._model_path))
@@ -318,8 +323,10 @@ class WholeProcess:
                         rows.append(
                             {
                                 "contribution_id": contribution_id,
+                                "contributionContent": contribution_text,
                                 "key_message": km_text,
                                 "key_message_type": km_type,
+                                "key_message_explanation": str(km.get("explanation", "")),
                                 "comment_text": comment_str,
                                 "stance": stance,
                                 "explanation": explanation,
