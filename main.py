@@ -17,6 +17,7 @@ import pandas as pd
 from sample_contributions import SampleContributions
 from key_message_extractor import KeyMessageExtraction
 from comment_fetcher import CommentFetcher
+from contributions_with_comments_dataset import ContributionsWithCommentsDataset
 
 console = Console()
 
@@ -677,7 +678,36 @@ def run_get_contribution_with_comments() -> None:
         get_contribution_with_comments(cid)
 
 
-MENU_OPTIONS = {"1", "2", "3", "4", "5", "6", "q"}
+def create_contributions_with_comments_dataset() -> None:
+    """Build a dataset of sampled contributions joined with their comments.
+
+    Loads the fetched contributions file, prompts for a sample size, then
+    delegates to :class:`ContributionsWithCommentsDataset`. Aborts with a
+    message if the file is missing, and skips if the user declines to overwrite
+    an existing output.
+    """
+    if not CONTRIBUTIONS_PATH.exists():
+        console.print(f"[red]No contributions file found at {CONTRIBUTIONS_PATH}. Run option 1 (Fetch contributions) first.[/red]")
+        return
+
+    n = _prompt_positive_int("Number of contributions to sample (n): ")
+
+    # Pass source_path explicitly so tests that redirect main.CONTRIBUTIONS_PATH
+    # into tmp_path read the same file this function validated above.
+    dataset = ContributionsWithCommentsDataset(n=n, source_path=CONTRIBUTIONS_PATH)
+
+    if dataset.output_path.exists() and not _prompt_overwrite(dataset.output_path):
+        console.print("[yellow]Skipping — existing file kept.[/yellow]")
+        return
+
+    try:
+        result_path = dataset.build()
+        console.print(f"[green]Dataset written to {result_path}[/green]")
+    except (FileNotFoundError, ValueError) as e:
+        console.print(f"[red]Failed: {e}[/red]")
+
+
+MENU_OPTIONS = {"1", "2", "3", "4", "5", "6", "7", "q"}
 
 
 def run_menu() -> str:
@@ -686,17 +716,17 @@ def run_menu() -> str:
     Loops until the user enters a valid option, re-prompting on bad input.
 
     Returns:
-        The selected option, one of "1", "2", "3", "4", "5", "6", or "q".
+        The selected option, one of "1", "2", "3", "4", "5", "6", "7", or "q".
     """
     while True:
         console.print(Panel(
-            "[bold]1[/bold] — Fetch contributions\n[bold]2[/bold] — Run stance detection\n[bold]3[/bold] — Sample contributions\n[bold]4[/bold] — Extract key messages\n[bold]5[/bold] — Inspect key messages\n[bold]6[/bold] — Fetch contribution with comments\n[bold]q[/bold] — Quit",
+            "[bold]1[/bold] — Fetch contributions\n[bold]2[/bold] — Run stance detection\n[bold]3[/bold] — Sample contributions\n[bold]4[/bold] — Extract key messages\n[bold]5[/bold] — Inspect key messages\n[bold]6[/bold] — Fetch contribution with comments\n[bold]7[/bold] — Build contributions-with-comments dataset\n[bold]q[/bold] — Quit",
             title="[bold cyan]DIPAS Analysis[/bold cyan]",
         ))
         choice = input("Select option: ").strip().lower()
         if choice in MENU_OPTIONS:
             return choice
-        console.print("[red]Invalid choice — enter 1, 2, 3, 4, 5, 6, or q.[/red]")
+        console.print("[red]Invalid choice — enter 1, 2, 3, 4, 5, 6, 7, or q.[/red]")
 
 
 def main() -> None:
@@ -722,6 +752,8 @@ def main() -> None:
         inspect_key_messages()
     elif choice == "6":
         run_get_contribution_with_comments()
+    elif choice == "7":
+        create_contributions_with_comments_dataset()
     else:
         console.print("[yellow]Goodbye.[/yellow]")
 
