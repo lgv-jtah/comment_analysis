@@ -462,10 +462,81 @@ def test_run_whole_process_skips_on_overwrite_decline(monkeypatch, tmp_data_dir)
     monkeypatch.setattr(
         main, "WholeProcess", lambda *a, **k: pytest.fail("should not construct")
     )
-    # File selection "1", then "n" to decline the overwrite prompt.
-    answers = iter(["1", "n"])
+    # File selection "1", blank count (all), then "n" to decline the overwrite.
+    answers = iter(["1", "", "n"])
     monkeypatch.setattr("builtins.input", lambda *a: next(answers))
 
     asyncio.run(main.run_whole_process())
 
     assert pd.read_parquet(output).equals(original)
+
+
+def _make_multi_row_source(tmp_data_dir, n_rows):
+    """Write a parquet with ``n_rows`` contributions and return its path."""
+    source = tmp_data_dir / "input.parquet"
+    pd.DataFrame(
+        {
+            "contribution_id": list(range(1, n_rows + 1)),
+            "contributionContent": [f"Beitrag {i}" for i in range(1, n_rows + 1)],
+            "comments": [["c1", "c2"] for _ in range(n_rows)],
+        }
+    ).to_parquet(source)
+    return source
+
+
+def test_run_whole_process_processes_subset(monkeypatch, tmp_data_dir):
+    """A count of "3" against 5 rows runs the pipeline on a 3-row sample."""
+    FakeWholeProcess.run_result = None
+    _make_multi_row_source(tmp_data_dir, 5)
+
+    monkeypatch.setattr(main, "WholeProcess", FakeWholeProcess)
+    inputs = iter(["1", "3"])  # file=1, count=3
+    monkeypatch.setattr("builtins.input", lambda *_: next(inputs))
+
+    asyncio.run(main.run_whole_process())
+
+    assert len(FakeWholeProcess.last_instance.run_df) == 3
+
+
+def test_run_whole_process_processes_all_on_blank(monkeypatch, tmp_data_dir):
+    """A blank count against 5 rows runs the pipeline on all 5 rows."""
+    FakeWholeProcess.run_result = None
+    _make_multi_row_source(tmp_data_dir, 5)
+
+    monkeypatch.setattr(main, "WholeProcess", FakeWholeProcess)
+    inputs = iter(["1", ""])  # file=1, count=blank (all)
+    monkeypatch.setattr("builtins.input", lambda *_: next(inputs))
+
+    asyncio.run(main.run_whole_process())
+
+    assert len(FakeWholeProcess.last_instance.run_df) == 5
+
+
+def test_run_whole_process_invalid_count_aborts(monkeypatch, tmp_data_dir):
+    """A non-numeric count aborts before any output is written."""
+    _make_multi_row_source(tmp_data_dir, 5)
+
+    monkeypatch.setattr(
+        main, "WholeProcess", lambda *a, **k: pytest.fail("should not construct")
+    )
+    inputs = iter(["1", "abc"])  # file=1, count=abc
+    monkeypatch.setattr("builtins.input", lambda *_: next(inputs))
+
+    asyncio.run(main.run_whole_process())
+
+    assert list(tmp_data_dir.glob("whole_process_*.parquet")) == []
+
+
+def test_run_whole_process_zero_count_aborts(monkeypatch, tmp_data_dir):
+    """A zero count aborts before any output is written."""
+    _make_multi_row_source(tmp_data_dir, 5)
+
+    monkeypatch.setattr(
+        main, "WholeProcess", lambda *a, **k: pytest.fail("should not construct")
+    )
+    inputs = iter(["1", "0"])  # file=1, count=0
+    monkeypatch.setattr("builtins.input", lambda *_: next(inputs))
+
+    asyncio.run(main.run_whole_process())
+
+    assert list(tmp_data_dir.glob("whole_process_*.parquet")) == []

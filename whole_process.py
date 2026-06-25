@@ -131,7 +131,7 @@ class WholeProcess:
         comment_text: str,
         key_message: str,
         semaphore: asyncio.Semaphore,
-    ) -> tuple[str | None, str | None]:
+    ) -> tuple[str | None, str | None, str]:
         """Resolve the stance for one comment against one key message.
 
         Routes through the fast path (canned neutral result), the ensemble path
@@ -146,11 +146,13 @@ class WholeProcess:
             semaphore: Concurrency guard for the LLM call.
 
         Returns:
-            A ``(stance, explanation)`` tuple; either element may be ``None`` if
-            the LLM call failed.
+            A ``(stance, explanation, path)`` tuple. ``stance`` and
+            ``explanation`` may each be ``None`` if the LLM call failed. ``path``
+            is the routing path taken: ``"fast_path"``, ``"ensemble"``, or
+            ``"llm"``.
         """
         if should_fast_path(gr_label, gr_score, comment_text):
-            return FAST_PATH_STANCE, FAST_PATH_EXPLANATION
+            return FAST_PATH_STANCE, FAST_PATH_EXPLANATION, "fast_path"
 
         item = {"comment_text": comment_text, "key_message": key_message}
         if should_ensemble_path(gr_label, gr_score, comment_text):
@@ -158,10 +160,12 @@ class WholeProcess:
             system, messages = self._stance_detector.build_messages(
                 self._prompt_config, item, gr_hint=hint
             )
+            path = "ensemble"
         else:
             system, messages = self._stance_detector.build_messages(
                 self._prompt_config, item
             )
+            path = "llm"
 
         result = await self._llm_handler.call_model(
             client=client,
@@ -173,8 +177,8 @@ class WholeProcess:
             enable_thinking=True,
         )
         if result:
-            return result.get("stance"), result.get("explanation")
-        return None, None
+            return result.get("stance"), result.get("explanation"), path
+        return None, None, path
 
     async def run(
         self, df: pd.DataFrame, proceeding_description: str = ""
@@ -191,6 +195,12 @@ class WholeProcess:
             proceeding_description: Optional planning-proceeding context passed
                 to the key-message extractor.
 
+        Emits detailed per-step console output: for each contribution it prints
+        a header, the key-message extraction time, and then — for every (key
+        message x comment) pair — the routing path taken, the per-pair elapsed
+        time, and the resolved stance. A per-contribution row count and elapsed
+        time follow each contribution, and a grand total is printed at the end.
+
         Returns:
             A DataFrame with :data:`OUTPUT_COLUMNS`; empty if no rows are
             produced.
@@ -205,6 +215,7 @@ class WholeProcess:
 
         async with httpx.AsyncClient() as client:
             for contrib_idx, (_, row) in enumerate(df.iterrows(), start=1):
+                contrib_start = time.time()
                 # Prefer the stable contribution_id when present and scalar; fall
                 # back to the loop index so every row still gets an identifier.
                 contribution_id = (
@@ -231,50 +242,93 @@ class WholeProcess:
                     else list(raw_comments)
                 )
 
+                console.print(
+                    f"[bold][{contrib_idx}/{total}] Contribution {contribution_id}[/bold]"
+                )
+
+                # Step 1: key message extraction with timer.
+                km_start = time.time()
                 key_messages = await self._extractor.extract(
                     client=client,
                     contribution=contribution_text,
                     proceeding_description=proceeding_description,
                     semaphore=semaphore,
                 )
+                km_elapsed = time.time() - km_start
                 if not key_messages:
                     console.print(
-                        f"[yellow][{contrib_idx}/{total}] contribution {contribution_id}: "
-                        f"no key messages extracted — skipping[/yellow]"
+                        f"  [yellow]↳ Key message extraction: no messages "
+                        f"({km_elapsed:.2f}s) — skipping[/yellow]"
                     )
                     continue
+                console.print(
+                    f"  [cyan]↳ Key message extraction: {len(key_messages)} messages "
+                    f"({km_elapsed:.2f}s)[/cyan]"
+                )
 
                 rows_added = 0
-                for km in key_messages:
-                    for comment_text in comments:
-                        gr_label, gr_score = self._classify_comment(str(comment_text))
-                        stance, explanation = await self._resolve_stance(
-                            client,
-                            gr_label,
-                            gr_score,
-                            str(comment_text),
-                            str(km.get("key_message", "")),
-                            semaphore,
+                for km_idx, km in enumerate(key_messages, start=1):
+                    km_text = str(km.get("key_message", ""))
+                    km_type = str(km.get("key_message_type", ""))
+                    # Truncate long key message text for display only.
+                    display_km = km_text[:60] + "…" if len(km_text) > 60 else km_text
+                    console.print(
+                        f"  [cyan]↳ KM {km_idx}/{len(key_messages)} "
+                        f"\"{display_km}\"[/cyan]"
+                    )
+
+                    for comment_idx, comment_text in enumerate(comments, start=1):
+                        comment_str = str(comment_text)
+                        # Per-comment: classify then resolve stance, timed together.
+                        step_start = time.time()
+                        gr_label, gr_score = self._classify_comment(comment_str)
+                        stance, explanation, path = await self._resolve_stance(
+                            client, gr_label, gr_score, comment_str, km_text, semaphore
                         )
+                        step_elapsed = time.time() - step_start
+
+                        # Color and label by path.
+                        path_colors = {
+                            "fast_path": "blue",
+                            "ensemble": "magenta",
+                            "llm": "white",
+                        }
+                        path_labels = {
+                            "fast_path": "FAST-PATH",
+                            "ensemble": "ENSEMBLE",
+                            "llm": "LLM",
+                        }
+                        color = path_colors.get(path, "white")
+                        label = path_labels.get(path, path.upper())
+                        stance_display = stance if stance is not None else "FAILED"
+
+                        console.print(
+                            f"      Comment {comment_idx}/{len(comments)}: "
+                            f"[{color}][{label}][/{color}]  "
+                            f"({step_elapsed:.2f}s) → {stance_display}"
+                        )
+
                         rows.append(
                             {
                                 "contribution_id": contribution_id,
-                                "key_message": str(km.get("key_message", "")),
-                                "key_message_type": str(km.get("key_message_type", "")),
-                                "comment_text": str(comment_text),
+                                "key_message": km_text,
+                                "key_message_type": km_type,
+                                "comment_text": comment_str,
                                 "stance": stance,
                                 "explanation": explanation,
                             }
                         )
                         rows_added += 1
 
+                contrib_elapsed = time.time() - contrib_start
                 console.print(
-                    f"[{contrib_idx}/{total}] contribution {contribution_id}: "
-                    f"{len(key_messages)} key messages, {len(comments)} comments "
-                    f"→ {rows_added} rows"
+                    f"  [green]→ {rows_added} rows  |  contribution: "
+                    f"{contrib_elapsed:.2f}s[/green]"
                 )
 
         total_elapsed = time.time() - total_start
-        console.print(f"Total whole-process time: {total_elapsed:.2f}s")
+        console.print(
+            f"[bold green]Total: {len(rows)} rows in {total_elapsed:.2f}s[/bold green]"
+        )
 
         return pd.DataFrame(rows, columns=OUTPUT_COLUMNS)

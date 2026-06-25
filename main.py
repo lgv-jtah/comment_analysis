@@ -464,8 +464,11 @@ async def run_whole_process() -> None:
     one row per pair with columns ``contribution_id``, ``key_message``,
     ``key_message_type``, ``comment_text``, ``stance``, and ``explanation`` — is
     written to ``whole_process_<source-stem>.parquet`` in the data directory.
-    Aborts early if no file is selected, a required column is missing, or the user
-    declines to overwrite an existing output.
+    Before processing, the user is prompted for how many contributions to handle;
+    a blank answer processes all of them, while a positive integer draws that
+    many as a random sample (clamped to the total available). Aborts early if no
+    file is selected, a required column is missing, the contribution count is not
+    a positive whole number, or the user declines to overwrite an existing output.
     """
     source_path = _pick_parquet_file(DATA_DIR)
     if source_path is None:
@@ -478,6 +481,30 @@ async def run_whole_process() -> None:
     if "comments" not in df.columns:
         console.print("[red]Selected file is missing the 'comments' column.[/red]")
         return
+
+    # Ask how many contributions to process; blank means all.
+    n_raw = input("Process how many contributions? (blank for all): ").strip()
+    if n_raw != "":
+        try:
+            n_contributions = int(n_raw)
+        except ValueError:
+            console.print("[red]Please enter a whole number or leave blank for all.[/red]")
+            return
+        if n_contributions <= 0:
+            console.print("[red]Please enter a number greater than zero.[/red]")
+            return
+        total_available = len(df)
+        if n_contributions < total_available:
+            df = df.sample(n=n_contributions)
+            console.print(
+                f"[cyan]Processing {n_contributions} of {total_available} "
+                f"contributions (random sample).[/cyan]"
+            )
+        else:
+            console.print(
+                f"[yellow]Requested {n_contributions} but only {total_available} "
+                f"available — using all.[/yellow]"
+            )
 
     output_path = DATA_DIR / f"whole_process_{source_path.stem}.parquet"
     if output_path.exists() and not _prompt_overwrite(output_path):
