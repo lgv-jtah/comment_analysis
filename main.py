@@ -630,7 +630,7 @@ def get_contribution_with_comments(contribution_id: int | None = None) -> dict |
             to pick one at random from the local contributions file.
 
     Returns:
-        A dict with keys "contribution" (dict) and "comments" (list[dict]),
+        A dict with keys "contribution" (dict) and "comments" (list[str]),
         or None if any step fails.
     """
     if not CONTRIBUTIONS_PATH.exists():
@@ -703,15 +703,20 @@ def get_contribution_with_comments(contribution_id: int | None = None) -> dict |
         # Release the DB engine even if get_comments raised, to avoid leaking connections.
         fetcher.close()
 
-    if not comments:
+    comment_texts = [c["field_comment_value"] for c in comments]
+
+    if not comment_texts:
         console.print(f"[yellow]No comments found for contribution {contribution_id}.[/yellow]")
 
+    comment_lines = "\n".join(
+        f"  {i}. {escape(text)}" for i, text in enumerate(comment_texts, start=1)
+    ) if comment_texts else "  (none)"
     console.print(Panel(
         f"[bold]Title:[/bold] {escape(str(contribution.get('title') or ''))}\n"
-        f"[bold]Comments:[/bold] {len(comments)}",
+        f"[bold]Comments ({len(comment_texts)}):[/bold]\n{comment_lines}",
         title=f"[bold cyan]Contribution {contribution_id}[/bold cyan]",
     ))
-    return {"contribution": contribution, "comments": comments}
+    return {"contribution": contribution, "comments": comment_texts}
 
 
 def run_get_contribution_with_comments() -> None:

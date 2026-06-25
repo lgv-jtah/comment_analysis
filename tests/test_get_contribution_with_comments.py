@@ -70,7 +70,7 @@ def test_id_provided_returns_contribution_and_comments(tmp_path, monkeypatch):
     assert result is not None
     assert result["contribution"]["id"] == 10
     assert result["contribution"]["title"] == "Test"
-    assert result["comments"] == fake_comments
+    assert result["comments"] == ["Nice"]
 
 
 def test_id_provided_calls_get_comments_with_native_int(tmp_path, monkeypatch):
@@ -106,7 +106,7 @@ def test_random_pick_uses_no_api(tmp_path, monkeypatch):
 
     assert result is not None
     assert result["contribution"]["id"] == 10
-    assert result["comments"] == fake_comments
+    assert result["comments"] == ["Nice"]
     mock_requests.get.assert_not_called()
     assert type(called_with["contribution_id"]) is int
 

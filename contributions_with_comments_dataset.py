@@ -131,7 +131,9 @@ class ContributionsWithCommentsDataset:
 
         Loads and samples the contributions, fetches comments for each sampled
         row, drops rows with no comments, and writes the survivors to
-        :attr:`output_path`. The fetcher is always closed, even on error.
+        :attr:`output_path`. The fetcher is always closed, even on error. Each
+        survivor gains a ``comments`` column holding a list of comment text
+        strings (``field_comment_value``).
 
         Returns:
             The path the dataset was written to.
@@ -160,7 +162,7 @@ class ContributionsWithCommentsDataset:
                     )
                     continue
                 record = row.to_dict()
-                record["comments"] = comments
+                record["comments"] = [c["field_comment_value"] for c in comments]
                 kept_records.append(record)
         finally:
             # Always release the DB engine, even if fetching raised.

@@ -79,13 +79,18 @@ def test_build_happy_path(tmp_path):
     assert len(result) == 5
     assert "comments" in result.columns
     first_id = int(result.iloc[0]["id"])
-    assert list(result.iloc[0]["comments"]) == comments_map[first_id]
+    expected = [c["field_comment_value"] for c in comments_map[first_id]]
+    assert list(result.iloc[0]["comments"]) == expected
 
 
 def test_contributions_without_comments_are_skipped(tmp_path):
     """Rows whose fetcher returns an empty list are dropped from the output."""
     source = _make_parquet(tmp_path)
-    comments_map = {1: [{"v": 1}], 3: [{"v": 3}], 5: [{"v": 5}]}
+    comments_map = {
+        1: [{"field_comment_value": "c1"}],
+        3: [{"field_comment_value": "c3"}],
+        5: [{"field_comment_value": "c5"}],
+    }
     fetcher = FakeCommentFetcher(comments_map)
     dataset = ContributionsWithCommentsDataset(
         n=5, source_path=source, fetcher=fetcher, random_state=0
@@ -115,7 +120,9 @@ def test_all_without_comments_writes_empty_parquet(tmp_path):
 def test_get_comments_called_with_native_int(tmp_path):
     """get_comments receives a native int (asserted inside the fake fetcher)."""
     source = _make_parquet(tmp_path)
-    fetcher = FakeCommentFetcher({i: [{"v": i}] for i in range(1, 6)})
+    fetcher = FakeCommentFetcher(
+        {i: [{"field_comment_value": f"c{i}"}] for i in range(1, 6)}
+    )
     dataset = ContributionsWithCommentsDataset(
         n=5, source_path=source, fetcher=fetcher, random_state=0
     )
@@ -127,7 +134,7 @@ def test_get_comments_called_with_native_int(tmp_path):
 def test_fetcher_close_called(tmp_path):
     """build closes the fetcher after a successful run."""
     source = _make_parquet(tmp_path)
-    fetcher = FakeCommentFetcher({1: [{"v": 1}]})
+    fetcher = FakeCommentFetcher({1: [{"field_comment_value": "c1"}]})
     dataset = ContributionsWithCommentsDataset(
         n=5, source_path=source, fetcher=fetcher, random_state=0
     )
@@ -197,7 +204,9 @@ def test_missing_id_column_raises_valueerror(tmp_path):
 def test_n_exceeds_available_clamps(tmp_path):
     """n larger than the row count clamps to all available rows."""
     source = _make_parquet(tmp_path)
-    fetcher = FakeCommentFetcher({i: [{"v": i}] for i in range(1, 6)})
+    fetcher = FakeCommentFetcher(
+        {i: [{"field_comment_value": f"c{i}"}] for i in range(1, 6)}
+    )
     dataset = ContributionsWithCommentsDataset(
         n=100, source_path=source, fetcher=fetcher, random_state=0
     )
@@ -212,7 +221,9 @@ def test_build_lazily_constructs_fetcher(tmp_path, monkeypatch):
     import comment_fetcher
 
     source = _make_parquet(tmp_path)
-    lazy = FakeCommentFetcher({i: [{"v": i}] for i in range(1, 6)})
+    lazy = FakeCommentFetcher(
+        {i: [{"field_comment_value": f"c{i}"}] for i in range(1, 6)}
+    )
 
     # Replace the class the lazy `from comment_fetcher import CommentFetcher`
     # resolves so build never touches a real database.
