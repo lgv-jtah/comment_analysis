@@ -20,6 +20,11 @@ from key_message_extractor import KeyMessageExtraction
 from comment_fetcher import CommentFetcher
 from contributions_with_comments_dataset import ContributionsWithCommentsDataset
 from whole_process import WholeProcess
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 
 console = Console()
 
@@ -193,6 +198,7 @@ async def run_stance_detection():
                     messages=messages,
                     semaphore=semaphore,
                     enable_thinking=True,
+                    api_key=LLM_API_KEY,
                 )
                 predictions[item["row_index"]] = (
                     result.get("stance") if result else None
@@ -222,6 +228,7 @@ async def run_stance_detection():
                     messages=messages,
                     semaphore=semaphore,
                     enable_thinking=True,
+                    api_key=LLM_API_KEY,
                 )
                 predictions[item["row_index"]] = (
                     result.get("stance") if result else None
@@ -417,7 +424,7 @@ async def run_key_message_extraction() -> None:
         console.print("[yellow]Skipping extraction — existing file kept.[/yellow]")
         return
 
-    extractor = KeyMessageExtraction(base_url=LLM_BASE_URL, model_name=LLM_MODEL_NAME)
+    extractor = KeyMessageExtraction(base_url=LLM_BASE_URL, model_name=LLM_MODEL_NAME, api_key=LLM_API_KEY)
     semaphore = asyncio.Semaphore(1)
 
     key_messages_col: list[list[dict] | None] = []
@@ -511,7 +518,7 @@ async def run_whole_process() -> None:
         console.print("[yellow]Skipping whole process — existing file kept.[/yellow]")
         return
 
-    processor = WholeProcess(base_url=LLM_BASE_URL, model_name=LLM_MODEL_NAME)
+    processor = WholeProcess(base_url=LLM_BASE_URL, model_name=LLM_MODEL_NAME, api_key=LLM_API_KEY)
     result_df = await processor.run(df, proceeding_description="")
     result_df.to_parquet(output_path)
     console.print(f"[green]Whole process saved to {output_path} — {len(result_df)} rows written[/green]")

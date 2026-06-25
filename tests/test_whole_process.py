@@ -312,6 +312,42 @@ def test_run_handles_nan_content(monkeypatch):
     assert captured["contribution"] == ""
 
 
+def test_api_key_defaults_to_empty_string():
+    """A WholeProcess built without api_key stores an empty string (no secret)."""
+    processor = WholeProcess(base_url="http://testserver/v1", model_name="test-model")
+    assert processor._api_key == ""
+
+
+def test_api_key_stored_and_forwarded(monkeypatch):
+    """api_key is stored and threaded into the stance-resolution LLM call."""
+    captured = {}
+
+    async def call_model(**kwargs):
+        captured.update(kwargs)
+        return {"stance": "in favor", "explanation": "reason"}
+
+    processor = WholeProcess(
+        base_url="http://testserver/v1", model_name="test-model", api_key="tok"
+    )
+    assert processor._api_key == "tok"
+    # The extractor must receive the same key.
+    assert processor._extractor._api_key == "tok"
+
+    processor._extractor = FakeExtractor([{"key_message": "km1", "key_message_type": "t"}])
+    processor._classifier = FakeClassifier()
+    monkeypatch.setattr(processor._llm_handler, "call_model", call_model)
+
+    df = pd.DataFrame(
+        {
+            "contribution_id": [1],
+            "contributionContent": ["Beitrag"],
+            "comments": [["a longer comment here"]],
+        }
+    )
+    asyncio.run(processor.run(df))
+    assert captured["api_key"] == "tok"
+
+
 def test_init_does_not_load_classifier(monkeypatch):
     """Constructing WholeProcess must not load the classifier model."""
     load_calls = {"n": 0}

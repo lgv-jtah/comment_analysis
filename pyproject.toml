@@ -16,6 +16,7 @@ dependencies = [
     "pyarrow>=24.0.0",
     "sqlalchemy",
     "psycopg2-binary",
+    "python-dotenv>=1.2.2",
 ]
 
 [dependency-groups]

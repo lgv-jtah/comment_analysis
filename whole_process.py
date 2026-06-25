@@ -84,6 +84,7 @@ class WholeProcess:
         self,
         base_url: str,
         model_name: str,
+        api_key: str = "",
         prompt_config_path: str = "./prompts/config.json",
         prompt_key: str = "base",
         model_path: Path = MODEL_PATH,
@@ -96,19 +97,24 @@ class WholeProcess:
         Args:
             base_url: vLLM/OpenAI-compatible endpoint base URL.
             model_name: Model identifier passed to the server.
+            api_key: API key forwarded to every LLM call (both key-message
+                extraction and stance resolution). Defaults to an empty string so
+                the pipeline can be constructed without a secret (e.g. in tests);
+                callers thread the real key in from the environment.
             prompt_config_path: Path to the stance prompt config JSON.
             prompt_key: Key within the config selecting the stance prompt.
             model_path: Directory holding the fine-tuned classifier weights.
         """
         self.base_url = base_url
         self.model_name = model_name
+        self._api_key = api_key
         self._model_path = model_path
         self._stance_detector = StanceDetector()
         self._llm_handler = LLMHandler()
         self._prompt_config = self._stance_detector.load_prompt_config(
             prompt_config_path, prompt_key
         )
-        self._extractor = KeyMessageExtraction(base_url=base_url, model_name=model_name)
+        self._extractor = KeyMessageExtraction(base_url=base_url, model_name=model_name, api_key=api_key)
         self._classifier = ReactionClassifier()
 
     def _classify_comment(self, comment_text: str) -> tuple[str, float]:
@@ -175,6 +181,7 @@ class WholeProcess:
             messages=messages,
             semaphore=semaphore,
             enable_thinking=True,
+            api_key=self._api_key,
         )
         if result:
             return result.get("stance"), result.get("explanation"), path

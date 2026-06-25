@@ -130,3 +130,29 @@ def test_response_schema_is_keymessage(monkeypatch):
     semaphore = asyncio.Semaphore(1)
     asyncio.run(extractor.extract(None, "Beitrag", "Verfahren", semaphore))
     assert captured["response_schema"] is KeyMessageList
+
+
+def test_api_key_defaults_to_empty_string():
+    """An extractor built without api_key stores an empty string (no secret)."""
+    extractor = _make_extractor()
+    assert extractor._api_key == ""
+
+
+def test_api_key_stored_and_forwarded(monkeypatch):
+    """api_key is stored on the instance and threaded into the LLM call."""
+    extractor = KeyMessageExtraction(
+        base_url="http://testserver/v1", model_name="test-model", api_key="tok"
+    )
+    assert extractor._api_key == "tok"
+
+    captured = {}
+
+    async def fake_call_model(**kwargs):
+        captured.update(kwargs)
+        return {}
+
+    monkeypatch.setattr(extractor._llm_handler, "call_model", fake_call_model)
+
+    semaphore = asyncio.Semaphore(1)
+    asyncio.run(extractor.extract(None, "Beitrag", "Verfahren", semaphore))
+    assert captured["api_key"] == "tok"

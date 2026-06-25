@@ -20,6 +20,7 @@ class KeyMessageExtraction:
         base_url: str,
         model_name: str,
         prompts_dir: Path = DEFAULT_PROMPTS_DIR,
+        api_key: str = "",
     ) -> None:
         """Initialize and load prompt config once.
 
@@ -28,9 +29,14 @@ class KeyMessageExtraction:
             model_name: Model identifier passed to the server.
             prompts_dir: Directory containing config.json and prompt text files.
                 Defaults to the prompts/ subdirectory next to this module.
+            api_key: API key forwarded to every LLM call. Defaults to an empty
+                string so the extractor can be constructed without a secret
+                (e.g. in tests); callers thread the real key in from the
+                environment.
         """
         self.base_url = base_url
         self.model_name = model_name
+        self._api_key = api_key
         self._llm_handler = LLMHandler()
         config_path = str(Path(prompts_dir) / "config.json")
         # Load prompt files once at init to avoid repeated file I/O on every extract() call.
@@ -77,6 +83,7 @@ class KeyMessageExtraction:
             messages=messages,
             semaphore=semaphore,
             enable_thinking=enable_thinking,
+            api_key=self._api_key,
             response_schema=KeyMessageList,
         )
         if raw is None:
