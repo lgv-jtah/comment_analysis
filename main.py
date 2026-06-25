@@ -12,6 +12,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 from rich.markup import escape
+from rich.table import Table
 from create_dataset import CreateDataset, API_URL
 import pandas as pd
 from sample_contributions import SampleContributions
@@ -52,6 +53,10 @@ FAST_PATH_EXPLANATION = "Allgemeine positive Reaktion — per KM neutral, Kommen
 # DEBUG / TEMPORARY — for manual test runs only. Remove before any full
 # production run: this caps the loop at the first few rows instead of all 155.
 DEBUG_ROW_LIMIT = 10
+
+# Maximum number of characters shown per table cell when inspecting a parquet
+# file; longer values are truncated with an ellipsis so the table stays legible.
+MAX_CELL_CHARS = 80
 
 
 def should_fast_path(
@@ -498,6 +503,51 @@ def inspect_key_messages() -> None:
             break
 
 
+def inspect_parquet() -> None:
+    """Show metadata and the first rows of a chosen parquet file.
+
+    Prompts the user to pick a source parquet file, then prints a metadata panel
+    (file name, total row count, and column names) followed by a Rich table of
+    the first ten rows. Each cell is stringified, NaN-guarded, truncated to
+    ``MAX_CELL_CHARS`` characters, and escaped so stray markup stays literal.
+    Aborts early if no file is selected.
+    """
+    source_path = _pick_parquet_file(DATA_DIR)
+    if source_path is None:
+        return
+
+    df = pd.read_parquet(source_path)
+
+    columns = "\n".join(f"  • {escape(str(col))}" for col in df.columns)
+    console.print(Panel(
+        f"[bold]File:[/bold] {escape(source_path.name)}\n"
+        f"[bold]Rows:[/bold] {len(df)}\n"
+        f"[bold]Columns:[/bold]\n{columns}",
+        title="[bold cyan]Parquet metadata[/bold cyan]",
+    ))
+
+    def _to_cell(value) -> str:
+        # np.ndim avoids the ambiguous truth value that pd.isna raises on
+        # array-valued cells; scalars have ndim 0 and are NaN-checked directly.
+        if np.ndim(value) == 0 and pd.isna(value):
+            return ""
+        text = str(value)
+        if len(text) > MAX_CELL_CHARS:
+            text = text[:MAX_CELL_CHARS - 1] + "…"
+        return escape(text)
+
+    table = Table()
+    for col in df.columns:
+        table.add_column(escape(str(col)))
+
+    head = df.head(10)
+    for row in head.itertuples(index=False):
+        cells = [_to_cell(value) for value in row]
+        table.add_row(*cells)
+
+    console.print(table)
+
+
 def sample_contributions() -> None:
     """Draw a random sample of contributions for chosen projects.
 
@@ -707,7 +757,7 @@ def create_contributions_with_comments_dataset() -> None:
         console.print(f"[red]Failed: {e}[/red]")
 
 
-MENU_OPTIONS = {"1", "2", "3", "4", "5", "6", "7", "q"}
+MENU_OPTIONS = {"1", "2", "3", "4", "5", "6", "7", "8", "q"}
 
 
 def run_menu() -> str:
@@ -716,17 +766,17 @@ def run_menu() -> str:
     Loops until the user enters a valid option, re-prompting on bad input.
 
     Returns:
-        The selected option, one of "1", "2", "3", "4", "5", "6", "7", or "q".
+        The selected option, one of "1", "2", "3", "4", "5", "6", "7", "8", or "q".
     """
     while True:
         console.print(Panel(
-            "[bold]1[/bold] — Fetch contributions\n[bold]2[/bold] — Run stance detection\n[bold]3[/bold] — Sample contributions\n[bold]4[/bold] — Extract key messages\n[bold]5[/bold] — Inspect key messages\n[bold]6[/bold] — Fetch contribution with comments\n[bold]7[/bold] — Build contributions-with-comments dataset\n[bold]q[/bold] — Quit",
+            "[bold]1[/bold] — Fetch contributions\n[bold]2[/bold] — Run stance detection\n[bold]3[/bold] — Sample contributions\n[bold]4[/bold] — Extract key messages\n[bold]5[/bold] — Inspect key messages\n[bold]6[/bold] — Fetch contribution with comments\n[bold]7[/bold] — Build contributions-with-comments dataset\n[bold]8[/bold] — Inspect parquet file\n[bold]q[/bold] — Quit",
             title="[bold cyan]DIPAS Analysis[/bold cyan]",
         ))
         choice = input("Select option: ").strip().lower()
         if choice in MENU_OPTIONS:
             return choice
-        console.print("[red]Invalid choice — enter 1, 2, 3, 4, 5, 6, 7, or q.[/red]")
+        console.print("[red]Invalid choice — enter 1, 2, 3, 4, 5, 6, 7, 8, or q.[/red]")
 
 
 def main() -> None:
@@ -754,6 +804,8 @@ def main() -> None:
         run_get_contribution_with_comments()
     elif choice == "7":
         create_contributions_with_comments_dataset()
+    elif choice == "8":
+        inspect_parquet()
     else:
         console.print("[yellow]Goodbye.[/yellow]")
 

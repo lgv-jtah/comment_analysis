@@ -927,3 +927,95 @@ def test_inspect_handles_nan_contribution(monkeypatch, tmp_paths):
     monkeypatch.setattr("builtins.input", lambda *a: next(answers))
 
     main.inspect_key_messages()
+
+
+# --- inspect parquet ---
+
+
+def test_run_menu_returns_8(monkeypatch):
+    """run_menu returns "8" when the user selects option 8."""
+    monkeypatch.setattr("builtins.input", lambda *a: "8")
+    assert main.run_menu() == "8"
+
+
+def test_main_dispatches_to_inspect_parquet(monkeypatch):
+    """main routes choice "8" to inspect_parquet."""
+    monkeypatch.setattr(main, "run_menu", lambda: "8")
+    called = {"inspect": False}
+    monkeypatch.setattr(
+        main, "inspect_parquet", lambda: called.__setitem__("inspect", True)
+    )
+    main.main()
+    assert called["inspect"] is True
+
+
+def test_inspect_parquet_aborts_without_files(monkeypatch, tmp_paths):
+    """inspect_parquet returns cleanly (no input) when no files exist."""
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr("builtins.input", lambda *a: pytest.fail("no input expected"))
+
+    main.inspect_parquet()
+
+
+def test_inspect_parquet_happy_path(monkeypatch, tmp_paths):
+    """inspect_parquet renders metadata and a table for a 12-row file."""
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    source = data_dir / "sample.parquet"
+    pd.DataFrame(
+        {"id": list(range(12)), "text": [f"row {i}" for i in range(12)]}
+    ).to_parquet(source)
+
+    monkeypatch.setattr("builtins.input", lambda *a: "1")
+
+    main.inspect_parquet()
+
+
+def test_inspect_parquet_truncates_long_cells(monkeypatch, tmp_paths, capsys):
+    """inspect_parquet truncates a long cell rather than printing it verbatim."""
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    source = data_dir / "long.parquet"
+    long_value = "a" * 200
+    pd.DataFrame({"id": [1], "text": [long_value]}).to_parquet(source)
+
+    monkeypatch.setattr("builtins.input", lambda *a: "1")
+
+    main.inspect_parquet()
+
+    out = capsys.readouterr().out
+    # The full 200-char string must not appear verbatim; truncation kicked in.
+    assert long_value not in out
+    assert "…" in out
+
+
+def test_inspect_parquet_handles_nan_cells(monkeypatch, tmp_paths):
+    """inspect_parquet does not crash on a NaN/None cell."""
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    source = data_dir / "nan.parquet"
+    pd.DataFrame(
+        {"id": [1, 2], "text": pd.Series(["hello", None], dtype="object")}
+    ).to_parquet(source)
+
+    monkeypatch.setattr("builtins.input", lambda *a: "1")
+
+    main.inspect_parquet()
+
+
+def test_inspect_parquet_empty_dataframe(monkeypatch, tmp_paths):
+    """inspect_parquet renders cleanly for a file with columns but no rows."""
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    source = data_dir / "empty.parquet"
+    pd.DataFrame(
+        {
+            "id": pd.Series([], dtype="int64"),
+            "text": pd.Series([], dtype="object"),
+        }
+    ).to_parquet(source)
+
+    monkeypatch.setattr("builtins.input", lambda *a: "1")
+
+    main.inspect_parquet()
