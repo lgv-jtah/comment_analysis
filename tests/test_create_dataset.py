@@ -266,7 +266,7 @@ def test_fetch_all_contributions_happy_path(monkeypatch):
     df = CreateDataset().fetch_all_contributions(["A", "B"])
     assert df.shape[0] == 4
     assert sorted(df["project_id"].tolist()) == ["A", "A", "B", "B"]
-    row = df[df["id"] == "1"].iloc[0]
+    row = df[df["contribution_id"] == "1"].iloc[0]
     assert row["project_id"] == "A"
     assert row["title"] == "T1"
     assert row["contributionContent"] == "C1"
@@ -333,7 +333,7 @@ def test_fetch_all_contributions_uses_instance_config(monkeypatch):
 
 def test_contributions_summary_happy_path():
     df = pd.DataFrame(
-        {"project_id": ["A", "A", "A", "B"], "id": [1, 2, 3, 4]}
+        {"project_id": ["A", "A", "A", "B"], "contribution_id": [1, 2, 3, 4]}
     )
     summary = CreateDataset().contributions_summary(df)
     assert summary != ""

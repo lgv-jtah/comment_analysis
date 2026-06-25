@@ -101,10 +101,12 @@ class ContributionsWithCommentsDataset:
             A DataFrame with ``min(n, len(df))`` randomly sampled rows.
 
         Raises:
-            ValueError: If ``df`` lacks the required ``id`` column.
+            ValueError: If ``df`` lacks the required ``contribution_id`` column.
         """
-        if "id" not in df.columns:
-            raise ValueError("DataFrame missing required column 'id'")
+        if "contribution_id" not in df.columns:
+            raise ValueError(
+                "DataFrame missing required column 'contribution_id'"
+            )
         effective_n = min(self.n, len(df))
         if effective_n < self.n:
             console.print(
@@ -140,7 +142,8 @@ class ContributionsWithCommentsDataset:
 
         Raises:
             FileNotFoundError: If the source file is missing.
-            ValueError: If the data is malformed (missing ``id`` column).
+            ValueError: If the data is malformed (missing ``contribution_id``
+                column).
         """
         df = self.load()
         sampled = self.draw_sample(df)
@@ -153,7 +156,7 @@ class ContributionsWithCommentsDataset:
         kept_records: list[dict] = []
         try:
             for _, row in sampled.iterrows():
-                contribution_id = int(row["id"])
+                contribution_id = int(row["contribution_id"])
                 comments = self.fetch_comments_for(contribution_id)
                 if not comments:
                     console.print(

@@ -25,7 +25,7 @@ def _write_parquet(tmp_path, rows):
 def _single_row():
     return [{
         "project_id": "p1",
-        "id": 10,
+        "contribution_id": 10,
         "title": "Test",
         "contributionContent": "Hello",
         "category": "cat1",
@@ -68,7 +68,7 @@ def test_id_provided_returns_contribution_and_comments(tmp_path, monkeypatch):
     result = main.get_contribution_with_comments(10)
 
     assert result is not None
-    assert result["contribution"]["id"] == 10
+    assert result["contribution"]["contribution_id"] == 10
     assert result["contribution"]["title"] == "Test"
     assert result["comments"] == ["Nice"]
 
@@ -105,7 +105,7 @@ def test_random_pick_uses_no_api(tmp_path, monkeypatch):
     result = main.get_contribution_with_comments(None)
 
     assert result is not None
-    assert result["contribution"]["id"] == 10
+    assert result["contribution"]["contribution_id"] == 10
     assert result["comments"] == ["Nice"]
     mock_requests.get.assert_not_called()
     assert type(called_with["contribution_id"]) is int

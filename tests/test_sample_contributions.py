@@ -24,7 +24,7 @@ def _make_contributions_df() -> pd.DataFrame:
             rows.append(
                 {
                     "project_id": project_id,
-                    "id": str(next_id),
+                    "contribution_id": str(next_id),
                     "title": f"Title {next_id}",
                     "contributionContent": f"Content {next_id}",
                     "category": f"Cat{next_id}",
@@ -57,12 +57,12 @@ def test_sample_is_reproducible(source_path):
     first = SampleContributions(
         ["A", "B"], n=3, source_path=source_path, random_state=7
     ).sample()
-    first_ids = sorted(pd.read_parquet(first)["id"].tolist())
+    first_ids = sorted(pd.read_parquet(first)["contribution_id"].tolist())
 
     second = SampleContributions(
         ["A", "B"], n=3, source_path=source_path, random_state=7
     ).sample()
-    second_ids = sorted(pd.read_parquet(second)["id"].tolist())
+    second_ids = sorted(pd.read_parquet(second)["contribution_id"].tolist())
 
     assert first_ids == second_ids
 

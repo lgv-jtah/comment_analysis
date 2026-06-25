@@ -29,7 +29,7 @@ def _make_parquet(tmp_path, rows=None):
         rows = [
             {
                 "project_id": "p1",
-                "id": i,
+                "contribution_id": i,
                 "title": f"title {i}",
                 "contributionContent": f"content {i}",
                 "category": "cat",
@@ -78,7 +78,7 @@ def test_build_happy_path(tmp_path):
     result = pd.read_parquet(out)
     assert len(result) == 5
     assert "comments" in result.columns
-    first_id = int(result.iloc[0]["id"])
+    first_id = int(result.iloc[0]["contribution_id"])
     expected = [c["field_comment_value"] for c in comments_map[first_id]]
     assert list(result.iloc[0]["comments"]) == expected
 
@@ -100,7 +100,7 @@ def test_contributions_without_comments_are_skipped(tmp_path):
     result = pd.read_parquet(out)
 
     assert len(result) == 3
-    assert sorted(int(i) for i in result["id"]) == [1, 3, 5]
+    assert sorted(int(i) for i in result["contribution_id"]) == [1, 3, 5]
 
 
 def test_all_without_comments_writes_empty_parquet(tmp_path):

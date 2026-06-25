@@ -630,8 +630,8 @@ def get_contribution_with_comments(contribution_id: int | None = None) -> dict |
             to pick one at random from the local contributions file.
 
     Returns:
-        A dict with keys "contribution" (dict) and "comments" (list[str]),
-        or None if any step fails.
+        A dict with keys "contribution" (dict, containing a "contribution_id"
+        key) and "comments" (list[str]), or None if any step fails.
     """
     if not CONTRIBUTIONS_PATH.exists():
         console.print(f"[red]No contributions file found at {CONTRIBUTIONS_PATH}. Run option 1 (Fetch contributions) first.[/red]")
@@ -639,8 +639,8 @@ def get_contribution_with_comments(contribution_id: int | None = None) -> dict |
 
     df = pd.read_parquet(CONTRIBUTIONS_PATH)
 
-    if "id" not in df.columns:
-        console.print("[red]Contributions file is missing the 'id' column.[/red]")
+    if "contribution_id" not in df.columns:
+        console.print("[red]Contributions file is missing the 'contribution_id' column.[/red]")
         return None
 
     if contribution_id is None:
@@ -649,18 +649,18 @@ def get_contribution_with_comments(contribution_id: int | None = None) -> dict |
             return None
         row = df.sample(n=1).iloc[0]
         # Parquet yields numpy.int64 which CommentFetcher rejects; cast to native int.
-        contribution_id = int(row["id"])
+        contribution_id = int(row["contribution_id"])
         project_id = row["project_id"]
         contribution = {
             "project_id": project_id,
-            "id": contribution_id,
+            "contribution_id": contribution_id,
             "title": None if pd.isna(row["title"]) else str(row["title"]),
             "contributionContent": None if pd.isna(row["contributionContent"]) else str(row["contributionContent"]),
             "category": None if pd.isna(row["category"]) else str(row["category"]),
         }
         console.print(f"[bold]Randomly picked contribution {contribution_id} from project {project_id}[/bold]")
     else:
-        matches = df[df["id"] == contribution_id]
+        matches = df[df["contribution_id"] == contribution_id]
         if matches.empty:
             console.print(f"[red]Contribution {contribution_id} not found in {CONTRIBUTIONS_PATH}.[/red]")
             return None
@@ -682,7 +682,7 @@ def get_contribution_with_comments(contribution_id: int | None = None) -> dict |
                 contribution = {
                     "project_id": project_id,
                     # Normalize to native int in case the API client returns numpy.int64.
-                    "id": int(props["id"]),
+                    "contribution_id": int(props["id"]),
                     "title": props.get("title"),
                     "contributionContent": props.get("contributionContent"),
                     "category": props.get("category"),

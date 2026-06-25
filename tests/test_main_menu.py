@@ -20,7 +20,7 @@ class FakeDataset:
 
     projects_df = pd.DataFrame({"id": [1, 2]})
     contributions_df = pd.DataFrame(
-        {"project_id": ["1", "1", "2"], "id": [10, 11, 12]}
+        {"project_id": ["1", "1", "2"], "contribution_id": [10, 11, 12]}
     )
     summary_text = "1    2\n2    1"
 
@@ -47,7 +47,7 @@ def fresh_fake():
     """Reset FakeDataset class-level state and yield the class."""
     FakeDataset.projects_df = pd.DataFrame({"id": [1, 2]})
     FakeDataset.contributions_df = pd.DataFrame(
-        {"project_id": ["1", "1", "2"], "id": [10, 11, 12]}
+        {"project_id": ["1", "1", "2"], "contribution_id": [10, 11, 12]}
     )
     FakeDataset.summary_text = "1    2\n2    1"
     FakeDataset.create_called = False
@@ -137,7 +137,7 @@ def test_fetch_contributions_writes_parquet(
     assert contrib_path.exists()
     written = pd.read_parquet(contrib_path)
     assert written.shape == (3, 2)
-    assert list(written.columns) == ["project_id", "id"]
+    assert list(written.columns) == ["project_id", "contribution_id"]
 
 
 def test_fetch_contributions_skips_on_decline(
@@ -173,7 +173,7 @@ def test_fetch_contributions_overwrites_on_confirm(
 
     assert fresh_fake.create_called is True
     written = pd.read_parquet(contrib_path)
-    assert list(written.columns) == ["project_id", "id"]
+    assert list(written.columns) == ["project_id", "contribution_id"]
     assert "keep" not in written.columns
 
 
@@ -464,7 +464,7 @@ def test_sample_contributions_happy_path(
     """sample_contributions builds the sampler with the chosen IDs and calls sample."""
     data_dir, contrib_path = tmp_paths
     data_dir.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame({"project_id": ["A", "B"], "id": [1, 2]}).to_parquet(contrib_path)
+    pd.DataFrame({"project_id": ["A", "B"], "contribution_id": [1, 2]}).to_parquet(contrib_path)
 
     monkeypatch.setattr(main, "SampleContributions", fresh_sampler)
     answers = iter(["A, B", "5"])
@@ -515,7 +515,7 @@ def test_sample_contributions_catches_valueerror(
     """sample_contributions swallows a ValueError raised by the sampler."""
     data_dir, contrib_path = tmp_paths
     data_dir.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame({"project_id": ["A"], "id": [1]}).to_parquet(contrib_path)
+    pd.DataFrame({"project_id": ["A"], "contribution_id": [1]}).to_parquet(contrib_path)
 
     fresh_sampler.sample_raises = ValueError("boom")
     monkeypatch.setattr(main, "SampleContributions", fresh_sampler)
@@ -533,7 +533,7 @@ def test_sample_contributions_catches_filenotfounderror(
     """sample_contributions swallows a FileNotFoundError raised by the sampler."""
     data_dir, contrib_path = tmp_paths
     data_dir.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame({"project_id": ["A"], "id": [1]}).to_parquet(contrib_path)
+    pd.DataFrame({"project_id": ["A"], "contribution_id": [1]}).to_parquet(contrib_path)
 
     fresh_sampler.sample_raises = FileNotFoundError("gone")
     monkeypatch.setattr(main, "SampleContributions", fresh_sampler)

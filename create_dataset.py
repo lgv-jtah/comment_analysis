@@ -99,9 +99,9 @@ class CreateDataset:
 
         Returns:
             A DataFrame with one row per contribution and the columns
-            ``project_id``, ``id``, ``title``, ``contributionContent`` and
-            ``category``. The DataFrame is empty if no contributions were
-            collected.
+            ``project_id``, ``contribution_id``, ``title``,
+            ``contributionContent`` and ``category``. The DataFrame is empty if
+            no contributions were collected.
 
         Notes:
             Per-project :class:`requests.RequestException` errors are caught
@@ -125,7 +125,7 @@ class CreateDataset:
                     all_contributions.append(
                         {
                             "project_id": project_id,
-                            "id": props.get("id"),
+                            "contribution_id": props.get("id"),
                             "title": props.get("title"),
                             "contributionContent": props.get(
                                 "contributionContent"
