@@ -19,6 +19,7 @@ from sample_contributions import SampleContributions
 from key_message_extractor import KeyMessageExtraction
 from comment_fetcher import CommentFetcher
 from contributions_with_comments_dataset import ContributionsWithCommentsDataset
+from whole_process import WholeProcess
 
 console = Console()
 
@@ -451,6 +452,44 @@ async def run_key_message_extraction() -> None:
     console.print(f"[green]Key messages saved to {output_path}[/green]")
 
 
+async def run_whole_process() -> None:
+    """Run the end-to-end whole-process pipeline over a chosen parquet file.
+
+    Prompts the user to pick a source parquet file and validates that it contains
+    both a ``contributionContent`` and a ``comments`` column, aborting with a red
+    error if either is missing. Delegates to :class:`WholeProcess`, which extracts
+    key messages per contribution and, for every (key message x comment) pair,
+    classifies the comment with the general-reaction classifier and resolves a
+    stance (fast path, ensemble path, or plain LLM call). The flattened result —
+    one row per pair with columns ``contribution_id``, ``key_message``,
+    ``key_message_type``, ``comment_text``, ``stance``, and ``explanation`` — is
+    written to ``whole_process_<source-stem>.parquet`` in the data directory.
+    Aborts early if no file is selected, a required column is missing, or the user
+    declines to overwrite an existing output.
+    """
+    source_path = _pick_parquet_file(DATA_DIR)
+    if source_path is None:
+        return
+
+    df = pd.read_parquet(source_path)
+    if "contributionContent" not in df.columns:
+        console.print("[red]Selected file is missing the 'contributionContent' column.[/red]")
+        return
+    if "comments" not in df.columns:
+        console.print("[red]Selected file is missing the 'comments' column.[/red]")
+        return
+
+    output_path = DATA_DIR / f"whole_process_{source_path.stem}.parquet"
+    if output_path.exists() and not _prompt_overwrite(output_path):
+        console.print("[yellow]Skipping whole process — existing file kept.[/yellow]")
+        return
+
+    processor = WholeProcess(base_url=LLM_BASE_URL, model_name=LLM_MODEL_NAME)
+    result_df = await processor.run(df, proceeding_description="")
+    result_df.to_parquet(output_path)
+    console.print(f"[green]Whole process saved to {output_path} — {len(result_df)} rows written[/green]")
+
+
 def inspect_key_messages() -> None:
     """Interactively page through a parquet file's extracted key messages.
 
@@ -762,7 +801,7 @@ def create_contributions_with_comments_dataset() -> None:
         console.print(f"[red]Failed: {e}[/red]")
 
 
-MENU_OPTIONS = {"1", "2", "3", "4", "5", "6", "7", "8", "q"}
+MENU_OPTIONS = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "q"}
 
 
 def run_menu() -> str:
@@ -771,17 +810,17 @@ def run_menu() -> str:
     Loops until the user enters a valid option, re-prompting on bad input.
 
     Returns:
-        The selected option, one of "1", "2", "3", "4", "5", "6", "7", "8", or "q".
+        The selected option, one of "1", "2", "3", "4", "5", "6", "7", "8", "9", or "q".
     """
     while True:
         console.print(Panel(
-            "[bold]1[/bold] — Fetch contributions\n[bold]2[/bold] — Run stance detection\n[bold]3[/bold] — Sample contributions\n[bold]4[/bold] — Extract key messages\n[bold]5[/bold] — Inspect key messages\n[bold]6[/bold] — Fetch contribution with comments\n[bold]7[/bold] — Build contributions-with-comments dataset\n[bold]8[/bold] — Inspect parquet file\n[bold]q[/bold] — Quit",
+            "[bold]1[/bold] — Fetch contributions\n[bold]2[/bold] — Run stance detection\n[bold]3[/bold] — Sample contributions\n[bold]4[/bold] — Extract key messages\n[bold]5[/bold] — Inspect key messages\n[bold]6[/bold] — Fetch contribution with comments\n[bold]7[/bold] — Build contributions-with-comments dataset\n[bold]8[/bold] — Inspect parquet file\n[bold]9[/bold] — Run whole process\n[bold]q[/bold] — Quit",
             title="[bold cyan]DIPAS Analysis[/bold cyan]",
         ))
         choice = input("Select option: ").strip().lower()
         if choice in MENU_OPTIONS:
             return choice
-        console.print("[red]Invalid choice — enter 1, 2, 3, 4, 5, 6, 7, 8, or q.[/red]")
+        console.print("[red]Invalid choice — enter 1, 2, 3, 4, 5, 6, 7, 8, 9, or q.[/red]")
 
 
 def main() -> None:
@@ -811,6 +850,10 @@ def main() -> None:
         create_contributions_with_comments_dataset()
     elif choice == "8":
         inspect_parquet()
+    elif choice == "9":
+        # run_whole_process is a coroutine driven by asyncio.run() from this
+        # synchronous entry point.
+        asyncio.run(run_whole_process())
     else:
         console.print("[yellow]Goodbye.[/yellow]")
 
