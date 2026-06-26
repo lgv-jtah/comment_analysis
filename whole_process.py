@@ -41,6 +41,7 @@ OUTPUT_COLUMNS = [
     "key_message",
     "key_message_type",
     "related_sentences",
+    "related_sentence_spans",
     "key_message_explanation",
     "comment_text",
     "stance",
@@ -78,6 +79,44 @@ def should_ensemble_path(label: str, score: float, text: str) -> bool:
         True if the comment qualifies for the ensemble path, False otherwise.
     """
     return label == "ja" and score > GR_SCORE_THRESHOLD and len(text.split()) > FAST_PATH_MAX_WORDS
+
+
+def find_sentence_spans(
+    text: str, sentences: list[str]
+) -> list[list[tuple[int, int]] | None]:
+    """Locate verbatim character spans of each sentence within ``text``.
+
+    For each sentence, finds every non-overlapping verbatim occurrence in
+    ``text`` and records its half-open ``(start, end)`` character span such that
+    ``text[start:end] == sentence``.
+
+    Args:
+        text: The source text to search within.
+        sentences: Candidate sentence strings to locate, in order.
+
+    Returns:
+        One element per input sentence, positionally aligned:
+        - A non-empty ``list[tuple[int, int]]`` of half-open spans when the
+          sentence occurs at least once.
+        - ``None`` when the sentence is empty or is not found verbatim. The
+          empty-string case returns ``None`` to avoid the ``''.find('') == 0``
+          infinite-loop hazard.
+    """
+    result: list[list[tuple[int, int]] | None] = []
+    for sentence in sentences:
+        # Skip empty sentences: ''.find('') returns 0 (a match at every
+        # position), which would make the str.find loop below never advance and
+        # spin forever. Map this case to None instead.
+        if not sentence:
+            result.append(None)
+            continue
+        spans: list[tuple[int, int]] = []
+        pos = text.find(sentence)
+        while pos != -1:
+            spans.append((pos, pos + len(sentence)))
+            pos = text.find(sentence, pos + len(sentence))
+        result.append(spans if spans else None)
+    return result
 
 
 class WholeProcess:
@@ -220,7 +259,10 @@ class WholeProcess:
             Each row additionally carries ``related_sentences`` — the verbatim
             source sentences for the key message (a ``list[str]``, stored
             natively in the parquet output). This is untrusted model output and
-            is defensively coerced to a list of strings.
+            is defensively coerced to a list of strings. Each row also carries
+            ``related_sentence_spans`` — the half-open character spans of those
+            sentences within ``contributionContent`` (one element per related
+            sentence, ``None`` where a sentence is empty or not found verbatim).
         """
         # Lazy load: defer the expensive BERT model load until run time.
         self._classifier.load_classifier(str(self._model_path))
@@ -294,6 +336,12 @@ class WholeProcess:
                     related_sentences = (
                         [str(s) for s in raw_rs] if isinstance(raw_rs, list) else []
                     )
+                    # Character-level spans of each related sentence within the
+                    # contribution text. Computed once per key message and reused
+                    # across every comment row below.
+                    sentence_spans = find_sentence_spans(
+                        contribution_text, related_sentences
+                    )
                     # Truncate long key message text for display only.
                     display_km = km_text[:60] + "…" if len(km_text) > 60 else km_text
                     console.print(
@@ -339,6 +387,7 @@ class WholeProcess:
                                 "key_message": km_text,
                                 "key_message_type": km_type,
                                 "related_sentences": related_sentences,
+                                "related_sentence_spans": sentence_spans,
                                 "key_message_explanation": str(km.get("explanation", "")),
                                 "comment_text": comment_str,
                                 "stance": stance,

@@ -18,6 +18,7 @@ from whole_process import (
     FAST_PATH_EXPLANATION,
     OUTPUT_COLUMNS,
     WholeProcess,
+    find_sentence_spans,
     should_ensemble_path,
     should_fast_path,
 )
@@ -107,6 +108,68 @@ def test_should_ensemble_path_true():
 
 def test_should_ensemble_path_short():
     assert should_ensemble_path("ja", 0.9, "Gut") is False
+
+
+# --- find_sentence_spans -------------------------------------------------
+
+
+def test_find_sentence_spans_single_occurrence():
+    """A sentence occurring once yields a single span that slices back to it."""
+    text = "Hallo Welt. Das ist ein Test."
+    sentences = ["Das ist ein Test."]
+    result = find_sentence_spans(text, sentences)
+    assert len(result) == 1
+    assert len(result[0]) == 1
+    start, end = result[0][0]
+    assert text[start:end] == sentences[0]
+
+
+def test_find_sentence_spans_multiple_occurrences():
+    """A sentence repeated in the text yields one span per occurrence."""
+    text = "ab cd ab ef ab"
+    sentences = ["ab"]
+    result = find_sentence_spans(text, sentences)
+    assert len(result) == 1
+    assert len(result[0]) == 3
+    for start, end in result[0]:
+        assert text[start:end] == "ab"
+
+
+def test_find_sentence_spans_not_found_returns_none():
+    """A sentence absent from the text maps to None."""
+    text = "Hallo Welt."
+    result = find_sentence_spans(text, ["nicht vorhanden"])
+    assert result[0] is None
+
+
+def test_find_sentence_spans_empty_list():
+    """An empty sentence list yields an empty result list."""
+    assert find_sentence_spans("irgendein Text", []) == []
+
+
+def test_find_sentence_spans_empty_sentence_string():
+    """An empty sentence maps to None (guards the ''.find('') infinite loop)."""
+    assert find_sentence_spans("irgendein Text", [""]) == [None]
+
+
+def test_find_sentence_spans_mixed():
+    """Found, missing, and empty sentences resolve independently in one call."""
+    text = "foo bar foo baz"
+    sentences = ["foo", "missing", "baz", ""]
+    result = find_sentence_spans(text, sentences)
+    assert len(result) == len(sentences)
+    # "foo" appears twice.
+    assert len(result[0]) == 2
+    for start, end in result[0]:
+        assert text[start:end] == "foo"
+    # "missing" is absent.
+    assert result[1] is None
+    # "baz" appears once.
+    assert len(result[2]) == 1
+    start, end = result[2][0]
+    assert text[start:end] == "baz"
+    # Empty string guard.
+    assert result[3] is None
 
 
 # --- WholeProcess.run ----------------------------------------------------
@@ -226,6 +289,114 @@ def test_run_related_sentences_survive_parquet_roundtrip(monkeypatch, tmp_path):
 
     assert "related_sentences" in read_back.columns
     assert list(read_back.iloc[0]["related_sentences"]) == related
+
+
+def test_run_includes_sentence_spans(monkeypatch):
+    """Spans are computed from contributionContent and shared across rows."""
+    contribution = "Wir brauchen mehr Bäume. Der Park ist schön."
+    km_list = [
+        {
+            "key_message": "km1",
+            "key_message_type": "t",
+            "related_sentences": ["Wir brauchen mehr Bäume.", "Der Park ist schön."],
+            "explanation": "km expl",
+        }
+    ]
+    processor = _make_processor(monkeypatch, km_list)
+    df = pd.DataFrame(
+        {
+            "contribution_id": [1],
+            "contributionContent": [contribution],
+            "comments": [["c1", "c2"]],
+        }
+    )
+
+    result = asyncio.run(processor.run(df))
+
+    assert "related_sentence_spans" in result.columns
+    assert len(result) == 2
+    expected = [
+        [(0, len("Wir brauchen mehr Bäume."))],
+        [(25, 25 + len("Der Park ist schön."))],
+    ]
+    for _, row in result.iterrows():
+        spans = row["related_sentence_spans"]
+        assert spans == expected
+        # Slicing invariant holds for every recorded span.
+        for sentence, sentence_spans in zip(
+            row["related_sentences"], spans, strict=True
+        ):
+            for start, end in sentence_spans:
+                assert contribution[start:end] == sentence
+    # Spans are identical across comment rows for the same key message.
+    assert result.iloc[0]["related_sentence_spans"] == result.iloc[1][
+        "related_sentence_spans"
+    ]
+
+
+def test_run_sentence_spans_none_when_not_found(monkeypatch):
+    """A related sentence absent from the contribution yields a None span."""
+    km_list = [
+        {
+            "key_message": "km1",
+            "key_message_type": "t",
+            "related_sentences": ["nicht im Beitrag enthalten"],
+            "explanation": "km expl",
+        }
+    ]
+    processor = _make_processor(monkeypatch, km_list)
+    df = pd.DataFrame(
+        {
+            "contribution_id": [1],
+            "contributionContent": ["Ein völlig anderer Beitrag."],
+            "comments": [["c1"]],
+        }
+    )
+
+    result = asyncio.run(processor.run(df))
+
+    assert result.iloc[0]["related_sentence_spans"] == [None]
+
+
+def test_run_sentence_spans_survive_parquet_roundtrip(monkeypatch, tmp_path):
+    """related_sentence_spans persists through parquet I/O."""
+    contribution = "Satz eins. Satz zwei."
+    km_list = [
+        {
+            "key_message": "km1",
+            "key_message_type": "t",
+            "related_sentences": ["Satz eins.", "fehlt"],
+            "explanation": "km expl",
+        }
+    ]
+    processor = _make_processor(monkeypatch, km_list)
+    df = pd.DataFrame(
+        {
+            "contribution_id": [1],
+            "contributionContent": [contribution],
+            "comments": [["c1"]],
+        }
+    )
+
+    result = asyncio.run(processor.run(df))
+
+    out_path = tmp_path / "out.parquet"
+    result.to_parquet(out_path)
+    read_back = pd.read_parquet(out_path)
+
+    assert "related_sentence_spans" in read_back.columns
+
+    def _normalize(spans):
+        # pyarrow may round-trip tuples as numpy arrays / lists; preserve None.
+        if spans is None:
+            return None
+        return [
+            None if s is None else [tuple(int(x) for x in pair) for pair in s]
+            for s in spans
+        ]
+
+    expected = _normalize(result.iloc[0]["related_sentence_spans"])
+    assert _normalize(read_back.iloc[0]["related_sentence_spans"]) == expected
 
 
 def test_run_fast_path_no_llm_call(monkeypatch):
