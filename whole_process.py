@@ -40,6 +40,7 @@ OUTPUT_COLUMNS = [
     "contributionContent",
     "key_message",
     "key_message_type",
+    "related_sentences",
     "key_message_explanation",
     "comment_text",
     "stance",
@@ -216,6 +217,10 @@ class WholeProcess:
             ``contributionContent`` and the key-message rationale in
             ``key_message_explanation``, alongside the contribution id, key
             message, key-message type, comment, stance, and stance explanation.
+            Each row additionally carries ``related_sentences`` — the verbatim
+            source sentences for the key message (a ``list[str]``, stored
+            natively in the parquet output). This is untrusted model output and
+            is defensively coerced to a list of strings.
         """
         # Lazy load: defer the expensive BERT model load until run time.
         self._classifier.load_classifier(str(self._model_path))
@@ -282,6 +287,13 @@ class WholeProcess:
                 for km_idx, km in enumerate(key_messages, start=1):
                     km_text = str(km.get("key_message", ""))
                     km_type = str(km.get("key_message_type", ""))
+                    # Verbatim source sentences for this key message. This is
+                    # untrusted model output, so coerce to a list of strings and
+                    # default to an empty list if absent or malformed.
+                    raw_rs = km.get("related_sentences", [])
+                    related_sentences = (
+                        [str(s) for s in raw_rs] if isinstance(raw_rs, list) else []
+                    )
                     # Truncate long key message text for display only.
                     display_km = km_text[:60] + "…" if len(km_text) > 60 else km_text
                     console.print(
@@ -326,6 +338,7 @@ class WholeProcess:
                                 "contributionContent": contribution_text,
                                 "key_message": km_text,
                                 "key_message_type": km_type,
+                                "related_sentences": related_sentences,
                                 "key_message_explanation": str(km.get("explanation", "")),
                                 "comment_text": comment_str,
                                 "stance": stance,

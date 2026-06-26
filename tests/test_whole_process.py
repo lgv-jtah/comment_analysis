@@ -115,8 +115,18 @@ def test_should_ensemble_path_short():
 def test_run_flattens_rows(monkeypatch):
     """Two key messages x two comments yields four flattened rows."""
     km_list = [
-        {"key_message": "km1", "key_message_type": "Wunsch", "explanation": "km expl 1"},
-        {"key_message": "km2", "key_message_type": "Kritik", "explanation": "km expl 2"},
+        {
+            "key_message": "km1",
+            "key_message_type": "Wunsch",
+            "related_sentences": ["s1a", "s1b"],
+            "explanation": "km expl 1",
+        },
+        {
+            "key_message": "km2",
+            "key_message_type": "Kritik",
+            "related_sentences": ["s2a"],
+            "explanation": "km expl 2",
+        },
     ]
     processor = _make_processor(monkeypatch, km_list)
     df = pd.DataFrame(
@@ -136,6 +146,86 @@ def test_run_flattens_rows(monkeypatch):
     assert set(result["comment_text"]) == {"c1", "c2"}
     assert set(result["contributionContent"]) == {"Beitrag"}
     assert set(result["key_message_explanation"]) == {"km expl 1", "km expl 2"}
+    assert "related_sentences" in result.columns
+    # Per-row related_sentences track the originating key message.
+    expected_rs = {"km1": ["s1a", "s1b"], "km2": ["s2a"]}
+    for _, row in result.iterrows():
+        assert list(row["related_sentences"]) == expected_rs[row["key_message"]]
+
+
+def test_run_includes_related_sentences(monkeypatch):
+    """Every (km x comment) row carries the km's related_sentences as a list."""
+    related = ["alpha", "beta", "gamma"]
+    km_list = [
+        {
+            "key_message": "km1",
+            "key_message_type": "t",
+            "related_sentences": related,
+            "explanation": "km expl",
+        }
+    ]
+    processor = _make_processor(monkeypatch, km_list)
+    df = pd.DataFrame(
+        {
+            "contribution_id": [1],
+            "contributionContent": ["Beitrag"],
+            "comments": [["c1", "c2", "c3"]],
+        }
+    )
+
+    result = asyncio.run(processor.run(df))
+
+    assert len(result) == 3
+    for value in result["related_sentences"]:
+        assert isinstance(value, list)
+        assert value == related
+
+
+def test_run_related_sentences_defaults_when_missing(monkeypatch):
+    """A km without a related_sentences key yields an empty list in the row."""
+    km_list = [{"key_message": "km1", "key_message_type": "t", "explanation": "km expl"}]
+    processor = _make_processor(monkeypatch, km_list)
+    df = pd.DataFrame(
+        {
+            "contribution_id": [1],
+            "contributionContent": ["Beitrag"],
+            "comments": [["a longer comment here"]],
+        }
+    )
+
+    result = asyncio.run(processor.run(df))
+
+    assert result.iloc[0]["related_sentences"] == []
+
+
+def test_run_related_sentences_survive_parquet_roundtrip(monkeypatch, tmp_path):
+    """related_sentences persists as a list-valued column through parquet I/O."""
+    related = ["s1", "s2"]
+    km_list = [
+        {
+            "key_message": "km1",
+            "key_message_type": "t",
+            "related_sentences": related,
+            "explanation": "km expl",
+        }
+    ]
+    processor = _make_processor(monkeypatch, km_list)
+    df = pd.DataFrame(
+        {
+            "contribution_id": [1],
+            "contributionContent": ["Beitrag"],
+            "comments": [["c1"]],
+        }
+    )
+
+    result = asyncio.run(processor.run(df))
+
+    out_path = tmp_path / "out.parquet"
+    result.to_parquet(out_path)
+    read_back = pd.read_parquet(out_path)
+
+    assert "related_sentences" in read_back.columns
+    assert list(read_back.iloc[0]["related_sentences"]) == related
 
 
 def test_run_fast_path_no_llm_call(monkeypatch):
