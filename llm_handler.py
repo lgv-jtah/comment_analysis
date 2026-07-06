@@ -17,6 +17,8 @@ STANCE_LABEL_MAP = {
 }
 
 
+
+
 def normalize_stance_label(raw):
     """Map the LLM's stance vocabulary to the gold-label convention.
 
@@ -77,6 +79,75 @@ class KeyMessageList(BaseModel):
     """
 
     key_messages: list[KeyMessage]
+
+class JudgeIssue(BaseModel):
+    """Schema for one issue the judge raises against a specific key message.
+
+    Attributes:
+        key_message_index: 0-based index of the offending key message, matching
+            the numbering produced by ``KeyMessageJudge.format_key_messages``.
+        problem: Description of what is wrong with that key message.
+        suggested_improvement: The judge's proposed fix for the problem.
+    """
+
+    key_message_index: int
+    problem: str
+    suggested_improvement: str
+
+class CompletenessScore(BaseModel):
+    """Schema for the completeness dimension of a key-message judgment.
+
+    Completeness scores the whole set of key messages together (rather than any
+    single one), so it carries missing topics instead of per-message issues.
+
+    Attributes:
+        score: The judge's completeness rating for the key-message set.
+        justification: Free-form rationale for the score.
+        missing_topics: Topics present in the contribution but not captured by
+            any key message.
+    """
+
+    score: int
+    justification: str
+    missing_topics: list[str]
+
+class IssueDimensionScore(BaseModel):
+    """Schema for a per-key-message dimension (precision or viability) score.
+
+    Used for the dimensions that fault individual key messages — semantic
+    precision and downstream viability — hence the list of per-message issues.
+
+    Attributes:
+        score: The judge's rating for this dimension.
+        justification: Free-form rationale for the score.
+        issues: Per-key-message problems found for this dimension; empty when
+            the judge raises none.
+    """
+
+    score: int
+    justification: str
+    issues: list[JudgeIssue]
+
+class KeyMessageJudgment(BaseModel):
+    """Schema for the full quality judgment of a contribution's key messages.
+
+    This is the top-level structured-output schema passed to the LLM by
+    ``KeyMessageJudge.judge`` and the shape returned to callers.
+
+    Attributes:
+        completeness: Whether the key messages cover the contribution's content.
+        semantic_precision: How accurately each key message captures its meaning.
+        downstream_viability: How usable the key messages are for downstream
+            stance detection.
+        overall_score: The judge's single aggregate score across all dimensions.
+        overall_assessment: Free-form summary of the overall judgment.
+    """
+
+    completeness: CompletenessScore
+    semantic_precision: IssueDimensionScore
+    downstream_viability: IssueDimensionScore
+    overall_score: int
+    overall_assessment: str
 
 class LLMHandler:
     """Wraps calls to an OpenAI-compatible (vLLM) chat completions endpoint."""

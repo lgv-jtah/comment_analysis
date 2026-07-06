@@ -8,5 +8,10 @@
         "description": "Key message extraction",
         "system_prompt": "key_message_system.txt",
         "user_prompt": "key_message_user.txt"
+    },
+    "key_message_judge": {
+        "description": "Key message quality judge",
+        "system_prompt": "key_message_judge_system.txt",
+        "user_prompt": "key_message_judge_user.txt"
     }
 }

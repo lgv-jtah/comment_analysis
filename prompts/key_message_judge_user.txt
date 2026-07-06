@@ -1,0 +1,49 @@
+Ich gebe dir einen Bürgerbeitrag, den zugehörigen Kontext und die bereits daraus extrahierten Hauptaussagen. Bewerte die Qualität dieser Hauptaussagen entlang der drei Dimensionen Vollständigkeit, semantische Präzision und Downstream-Tauglichkeit.
+
+        Der Beitrag stammt aus einem Beteiligungsverfahren mit folgender Kategorie / folgendem Kontext:
+
+        $category
+
+        Der Beitrag lautet: '$contribution'
+
+        Die daraus extrahierten Hauptaussagen (jeweils mit 0-basiertem Index und Hauptaussagenart) lauten:
+
+        $key_messages_formatted
+
+        Bewerte nun die Hauptaussagen. Beziehe dich in den "issues"-Einträgen mit "key_message_index" auf den oben angegebenen Index der jeweiligen Hauptaussage.
+
+Antworte ausschließlich mit einem JSON-Objekt mit genau dieser Struktur und ohne Backticks:
+
+        {
+            "completeness": {
+                "score": <1-5>,
+                "justification": "<Begründung>",
+                "missing_topics": ["<fehlendes Thema>", …]
+            },
+            "semantic_precision": {
+                "score": <1-5>,
+                "justification": "<Begründung>",
+                "issues":
+                    [
+                        {
+                            "key_message_index": <Index>,
+                            "problem": "<Problem>",
+                            "suggested_improvement": "<Verbesserungsvorschlag>"
+                        }
+                    ]
+            },
+            "downstream_viability": {
+                "score": <1-5>,
+                "justification": "<Begründung>",
+                "issues":
+                    [
+                        {
+                            "key_message_index": <Index>,
+                            "problem": "<Problem>",
+                            "suggested_improvement": "<Verbesserungsvorschlag>"
+                        }
+                    ]
+            },
+            "overall_score": <1-5>,
+            "overall_assessment": "<Gesamtbewertung>"
+        }
