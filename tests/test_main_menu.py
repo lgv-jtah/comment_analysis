@@ -1019,3 +1019,300 @@ def test_inspect_parquet_empty_dataframe(monkeypatch, tmp_paths):
     monkeypatch.setattr("builtins.input", lambda *a: "1")
 
     main.inspect_parquet()
+
+
+# --- export parquet to excel ---
+
+
+def test_run_menu_returns_10(monkeypatch):
+    """run_menu returns "10" when the user selects option 10."""
+    monkeypatch.setattr("builtins.input", lambda *a: "10")
+    assert main.run_menu() == "10"
+
+
+def test_main_dispatches_to_export_excel(monkeypatch):
+    """main routes choice "10" to export_parquet_to_excel."""
+    monkeypatch.setattr(main, "run_menu", lambda: "10")
+    called = {"export": False}
+    monkeypatch.setattr(
+        main, "export_parquet_to_excel", lambda: called.__setitem__("export", True)
+    )
+    main.main()
+    assert called["export"] is True
+
+
+def test_export_parquet_to_excel_aborts_without_files(monkeypatch, tmp_paths):
+    """export_parquet_to_excel returns cleanly (no input) when no files exist."""
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr("builtins.input", lambda *a: pytest.fail("no input expected"))
+
+    main.export_parquet_to_excel()
+
+
+def test_export_parquet_to_excel_writes_xlsx(monkeypatch, tmp_paths):
+    """export_parquet_to_excel writes an .xlsx file matching the source data."""
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    source = data_dir / "sample.parquet"
+    pd.DataFrame({"id": [1, 2], "text": ["a", "b"]}).to_parquet(source)
+
+    monkeypatch.setattr("builtins.input", lambda *a: "1")
+
+    main.export_parquet_to_excel()
+
+    output = data_dir / "sample.xlsx"
+    assert output.exists()
+    written = pd.read_excel(output)
+    assert written.to_dict("list") == {"id": [1, 2], "text": ["a", "b"]}
+
+
+# --- key message judge ---
+
+
+def _make_km(text="km", km_type="Wunsch"):
+    """Return a single valid key-message dict for judge tests."""
+    return {
+        "key_message": text,
+        "key_message_type": km_type,
+        "related_sentences": ["s1"],
+        "explanation": "why",
+    }
+
+
+class FakeJudge:
+    """Network-free stand-in for ``key_message_judge.KeyMessageJudge``.
+
+    Class-level attributes capture the constructor kwargs, record every
+    ``judge`` call's key-message list, and let each test configure the returned
+    judgment (including ``None`` to simulate a failed judge call).
+    """
+
+    init_args = None
+    judge_return = {"overall_score": 4, "overall_assessment": "gut"}
+    judge_calls = []
+
+    def __init__(self, *args, **kwargs):
+        FakeJudge.init_args = kwargs
+
+    async def judge(
+        self,
+        *,
+        client,
+        contribution,
+        category,
+        key_messages,
+        semaphore,
+        enable_thinking=False,
+    ):
+        FakeJudge.judge_calls.append(key_messages)
+        return FakeJudge.judge_return
+
+
+@pytest.fixture
+def fresh_judge():
+    """Reset FakeJudge class-level state and yield the class."""
+    FakeJudge.init_args = None
+    FakeJudge.judge_return = {"overall_score": 4, "overall_assessment": "gut"}
+    FakeJudge.judge_calls = []
+    return FakeJudge
+
+
+def test_run_menu_returns_11(monkeypatch):
+    """run_menu returns "11" when the user selects option 11."""
+    monkeypatch.setattr("builtins.input", lambda *a: "11")
+    assert main.run_menu() == "11"
+
+
+def test_main_dispatches_to_key_message_judge(monkeypatch):
+    """main routes choice "11" to run_key_message_judge via asyncio.run."""
+    monkeypatch.setattr(main, "run_menu", lambda: "11")
+    called = {"run": False}
+
+    async def fake_run():
+        called["run"] = True
+
+    monkeypatch.setattr(main, "run_key_message_judge", fake_run)
+    main.main()
+    assert called["run"] is True
+
+
+def test_run_key_message_judge_aborts_without_files(
+    monkeypatch, tmp_paths, fresh_judge
+):
+    """run_key_message_judge aborts (no judge) when no files exist."""
+    import asyncio
+
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(main, "KeyMessageJudge", fresh_judge)
+    monkeypatch.setattr("builtins.input", lambda *a: pytest.fail("no input expected"))
+
+    asyncio.run(main.run_key_message_judge())
+
+    assert fresh_judge.init_args is None
+    assert list(data_dir.glob("judged_*.parquet")) == []
+
+
+def test_run_key_message_judge_aborts_on_missing_key_messages(
+    monkeypatch, tmp_paths, fresh_judge
+):
+    """run_key_message_judge aborts when the source lacks key_messages."""
+    import asyncio
+
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    source = data_dir / "input.parquet"
+    pd.DataFrame({"contributionContent": ["hello"]}).to_parquet(source)
+
+    monkeypatch.setattr(main, "KeyMessageJudge", fresh_judge)
+    monkeypatch.setattr("builtins.input", lambda *a: "1")
+
+    asyncio.run(main.run_key_message_judge())
+
+    assert fresh_judge.init_args is None
+    assert list(data_dir.glob("judged_*.parquet")) == []
+
+
+def test_run_key_message_judge_aborts_on_missing_contribution(
+    monkeypatch, tmp_paths, fresh_judge
+):
+    """run_key_message_judge aborts when the source lacks contributionContent."""
+    import asyncio
+
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    source = data_dir / "input.parquet"
+    pd.DataFrame({"key_messages": [[_make_km()]]}).to_parquet(source)
+
+    monkeypatch.setattr(main, "KeyMessageJudge", fresh_judge)
+    monkeypatch.setattr("builtins.input", lambda *a: "1")
+
+    asyncio.run(main.run_key_message_judge())
+
+    assert fresh_judge.init_args is None
+    assert list(data_dir.glob("judged_*.parquet")) == []
+
+
+def test_run_key_message_judge_happy_path(monkeypatch, tmp_paths, fresh_judge):
+    """run_key_message_judge writes a parquet with the judge_result column."""
+    import asyncio
+
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    source = data_dir / "input.parquet"
+    pd.DataFrame(
+        {
+            "contributionContent": ["hello", "world"],
+            "category": ["Radverkehr", "Grünflächen"],
+            "key_messages": [[_make_km("a")], [_make_km("b")]],
+        }
+    ).to_parquet(source)
+
+    monkeypatch.setattr(main, "KeyMessageJudge", fresh_judge)
+    monkeypatch.setattr("builtins.input", lambda *a: "1")
+
+    asyncio.run(main.run_key_message_judge())
+
+    assert fresh_judge.init_args is not None
+    assert fresh_judge.init_args["base_url"] == main.JUDGE_LLM_BASE_URL
+    assert fresh_judge.init_args["model_name"] == main.JUDGE_LLM_MODEL_NAME
+    assert fresh_judge.init_args["api_key"] == main.JUDGE_LLM_API_KEY
+
+    output = data_dir / "judged_input.parquet"
+    assert output.exists()
+    written = pd.read_parquet(output)
+    assert "judge_result" in written.columns
+    assert list(written["judge_result"]) == [
+        fresh_judge.judge_return,
+        fresh_judge.judge_return,
+    ]
+    # Two rows judged; key-message lists forwarded to the judge.
+    assert len(fresh_judge.judge_calls) == 2
+
+
+def test_run_key_message_judge_skips_none_row(monkeypatch, tmp_paths, fresh_judge):
+    """A row with key_messages=None is skipped: not judged, output cell is None."""
+    import asyncio
+
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    source = data_dir / "input.parquet"
+    pd.DataFrame(
+        {
+            "contributionContent": ["hello", "world"],
+            "key_messages": pd.Series([None, [_make_km("b")]], dtype="object"),
+        }
+    ).to_parquet(source)
+
+    monkeypatch.setattr(main, "KeyMessageJudge", fresh_judge)
+    monkeypatch.setattr("builtins.input", lambda *a: "1")
+
+    asyncio.run(main.run_key_message_judge())
+
+    output = data_dir / "judged_input.parquet"
+    written = pd.read_parquet(output)
+    # First row skipped -> None; second row judged.
+    assert written["judge_result"].iloc[0] is None
+    assert written["judge_result"].iloc[1] == fresh_judge.judge_return
+    # The skipped row's key messages must not reach the judge.
+    assert len(fresh_judge.judge_calls) == 1
+
+
+def test_run_key_message_judge_handles_none_result(
+    monkeypatch, tmp_paths, fresh_judge
+):
+    """A failed judge (None) writes a None cell and the summary avoids div-by-zero."""
+    import asyncio
+
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    source = data_dir / "input.parquet"
+    pd.DataFrame(
+        {
+            "contributionContent": ["hello"],
+            "key_messages": [[_make_km("a")]],
+        }
+    ).to_parquet(source)
+
+    fresh_judge.judge_return = None
+    monkeypatch.setattr(main, "KeyMessageJudge", fresh_judge)
+    monkeypatch.setattr("builtins.input", lambda *a: "1")
+
+    # Must not raise despite zero valid overall scores.
+    asyncio.run(main.run_key_message_judge())
+
+    output = data_dir / "judged_input.parquet"
+    written = pd.read_parquet(output)
+    assert written["judge_result"].isna().all()
+
+
+def test_run_key_message_judge_skips_on_overwrite_decline(
+    monkeypatch, tmp_paths, fresh_judge
+):
+    """run_key_message_judge leaves output untouched and never judges on decline."""
+    import asyncio
+
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    source = data_dir / "input.parquet"
+    pd.DataFrame(
+        {
+            "contributionContent": ["hello"],
+            "key_messages": [[_make_km("a")]],
+        }
+    ).to_parquet(source)
+
+    output = data_dir / "judged_input.parquet"
+    original = pd.DataFrame({"keep": [1]})
+    original.to_parquet(output)
+
+    monkeypatch.setattr(main, "KeyMessageJudge", fresh_judge)
+    # File selection "1", then "n" to decline the overwrite prompt.
+    answers = iter(["1", "n"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+
+    asyncio.run(main.run_key_message_judge())
+
+    assert pd.read_parquet(output).equals(original)
+    assert fresh_judge.judge_calls == []

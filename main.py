@@ -17,6 +17,7 @@ from create_dataset import CreateDataset, API_URL
 import pandas as pd
 from sample_contributions import SampleContributions
 from key_message_extractor import KeyMessageExtraction
+from key_message_judge import KeyMessageJudge
 from comment_fetcher import CommentFetcher
 from contributions_with_comments_dataset import ContributionsWithCommentsDataset
 from whole_process import WholeProcess
@@ -25,6 +26,9 @@ import os
 
 load_dotenv()
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
+# The judge feature authenticates against its own gateway (see JUDGE_LLM_*
+# below), so it needs a credential distinct from the shared LLM_API_KEY.
+JUDGE_LLM_API_KEY = os.getenv("JUDGE_LLM_API_KEY", "")
 
 console = Console()
 
@@ -40,6 +44,13 @@ CONTRIBUTIONS_PATH = DATA_DIR / "contributions.parquet"
 LLM_BASE_URL = "https://api.lyceum.technology/api/v2/external/serverless"
 # LLM_MODEL_NAME = "Qwen/Qwen3.5-27B-FP8"
 LLM_MODEL_NAME = "Qwen/Qwen3-32B"
+
+# Judge-specific endpoint: the LLM-as-a-judge feature calls Claude via an
+# OpenAI-compatible gateway, not the self-hosted Qwen vLLM endpoint above.
+# Unlike LLM_BASE_URL, this is sourced from the environment (not hardcoded)
+# because the gateway URL varies by deployment.
+JUDGE_LLM_BASE_URL = os.getenv("JUDGE_LLM_BASE_URL", "")
+JUDGE_LLM_MODEL_NAME = "claude-opus-4-8"
 
 # Fast-path gate thresholds (see general_reaction_gate_konzept.md, Task 1.3).
 # NOTE: 0.6 is an interim placeholder, NOT a tuned production value. The
@@ -459,6 +470,116 @@ async def run_key_message_extraction() -> None:
     console.print(f"[green]Key messages saved to {output_path}[/green]")
 
 
+async def run_key_message_judge() -> None:
+    """Judge the quality of already-extracted key messages in a parquet file.
+
+    Prompts the user to pick a source parquet file, validates that it contains
+    both a ``key_messages`` and a ``contributionContent`` column, then runs
+    :class:`KeyMessageJudge` over every row (serialized via a semaphore of 1) and
+    writes a new ``judged_<source-stem>.parquet`` file. A single ``judge_result``
+    column is added: each cell holds the judgment dict produced by the LLM (or
+    ``None`` if the row was skipped because it had no key messages, or if the
+    judge call failed). The per-row elapsed time is printed after each row, and
+    once every row has been processed an aggregate summary panel reports the mean
+    overall score together with the judged, failed, and skipped counts. Aborts
+    early if no file is selected, a required column is missing, or the user
+    declines to overwrite an existing output.
+    """
+    source_path = _pick_parquet_file(DATA_DIR)
+    if source_path is None:
+        return
+
+    df = pd.read_parquet(source_path)
+    if "key_messages" not in df.columns:
+        console.print("[red]Selected file is missing the 'key_messages' column.[/red]")
+        return
+    if "contributionContent" not in df.columns:
+        console.print("[red]Selected file is missing the 'contributionContent' column.[/red]")
+        return
+
+    output_path = DATA_DIR / f"judged_{source_path.stem}.parquet"
+    if output_path.exists() and not _prompt_overwrite(output_path):
+        console.print("[yellow]Skipping judging — existing file kept.[/yellow]")
+        return
+
+    judge = KeyMessageJudge(base_url=JUDGE_LLM_BASE_URL, model_name=JUDGE_LLM_MODEL_NAME, api_key=JUDGE_LLM_API_KEY)
+    semaphore = asyncio.Semaphore(1)
+
+    judge_col: list[dict | None] = []
+    judged = 0
+    failed = 0
+    skipped = 0
+
+    total = len(df)
+    total_start = time.time()
+    async with httpx.AsyncClient() as client:
+        for index, (_, row) in enumerate(df.iterrows(), start=1):
+            iter_start = time.time()
+            km = row["key_messages"]
+            # np.ndim avoids the ambiguous truth value that pd.isna raises on
+            # array-valued cells; scalars have ndim 0 and are NaN-checked directly.
+            if km is None or (np.ndim(km) == 0 and pd.isna(km)):
+                judge_col.append(None)
+                skipped += 1
+                console.print(f"[yellow][{index}/{total}] skipped (no key messages)[/yellow]")
+                continue
+
+            contribution = "" if pd.isna(row["contributionContent"]) else str(row["contributionContent"])
+            category = str(row["category"]) if "category" in df.columns and not pd.isna(row["category"]) else ""
+            # Parquet may hand back a numpy array rather than a plain list.
+            key_messages_list = list(km)
+
+            result = await judge.judge(
+                client=client,
+                contribution=contribution,
+                category=category,
+                key_messages=key_messages_list,
+                semaphore=semaphore,
+            )
+            iter_elapsed = time.time() - iter_start
+            if result is not None:
+                judge_col.append(result)
+                judged += 1
+                console.print(
+                    f"[{index}/{total}] overall_score={result.get('overall_score', '?')} ({iter_elapsed:.2f}s)"
+                )
+            else:
+                judge_col.append(None)
+                failed += 1
+                console.print(f"[red][{index}/{total}] FAILED ({iter_elapsed:.2f}s)[/red]")
+
+    total_elapsed = time.time() - total_start
+    console.print(f"Total judging time: {total_elapsed:.2f}s")
+
+    result_df = df.copy()
+    result_df["judge_result"] = judge_col
+    result_df.to_parquet(output_path)
+    console.print(f"[green]Judgments saved to {output_path}[/green]")
+
+    # Collect only numeric overall_score values from successful judgments so a
+    # malformed/missing score never poisons the mean or raises.
+    scores = []
+    for result in judge_col:
+        if result is None:
+            continue
+        score = result.get("overall_score")
+        if isinstance(score, (int, float)) and not isinstance(score, bool):
+            scores.append(score)
+
+    if scores:
+        mean_line = f"[bold]Mean overall score:[/bold] {sum(scores) / len(scores):.2f}"
+    else:
+        mean_line = "[bold]Mean overall score:[/bold] no rows judged"
+
+    console.print(Panel(
+        f"{mean_line}\n"
+        f"[bold]Judged:[/bold] {judged}\n"
+        f"[bold]Failed:[/bold] {failed}\n"
+        f"[bold]Skipped:[/bold] {skipped}",
+        title="[bold cyan]Key message judge summary[/bold cyan]",
+    ))
+
+
 async def run_whole_process() -> None:
     """Run the end-to-end whole-process pipeline over a chosen parquet file.
 
@@ -619,6 +740,24 @@ def inspect_parquet() -> None:
         table.add_row(*cells)
 
     console.print(table)
+
+
+def export_parquet_to_excel() -> None:
+    """Convert a chosen parquet file to an Excel workbook.
+
+    Prompts the user to pick a source parquet file, then writes an ``.xlsx``
+    file with the same stem next to it in ``DATA_DIR``. Aborts early if no
+    file is selected.
+    """
+    source_path = _pick_parquet_file(DATA_DIR)
+    if source_path is None:
+        return
+
+    df = pd.read_parquet(source_path)
+
+    output_path = source_path.with_suffix(".xlsx")
+    df.to_excel(output_path, index=False)
+    console.print(f"[green]Wrote {len(df)} rows to {output_path}.[/green]")
 
 
 def sample_contributions() -> None:
@@ -835,7 +974,7 @@ def create_contributions_with_comments_dataset() -> None:
         console.print(f"[red]Failed: {e}[/red]")
 
 
-MENU_OPTIONS = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "q"}
+MENU_OPTIONS = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "q"}
 
 
 def run_menu() -> str:
@@ -844,17 +983,17 @@ def run_menu() -> str:
     Loops until the user enters a valid option, re-prompting on bad input.
 
     Returns:
-        The selected option, one of "1", "2", "3", "4", "5", "6", "7", "8", "9", or "q".
+        The selected option, one of "1"-"11" or "q".
     """
     while True:
         console.print(Panel(
-            "[bold]1[/bold] — Fetch contributions\n[bold]2[/bold] — Run stance detection\n[bold]3[/bold] — Sample contributions\n[bold]4[/bold] — Extract key messages\n[bold]5[/bold] — Inspect key messages\n[bold]6[/bold] — Fetch contribution with comments\n[bold]7[/bold] — Build contributions-with-comments dataset\n[bold]8[/bold] — Inspect parquet file\n[bold]9[/bold] — Run whole process\n[bold]q[/bold] — Quit",
+            "[bold]1[/bold] — Fetch contributions\n[bold]2[/bold] — Run stance detection\n[bold]3[/bold] — Sample contributions\n[bold]4[/bold] — Extract key messages\n[bold]5[/bold] — Inspect key messages\n[bold]6[/bold] — Fetch contribution with comments\n[bold]7[/bold] — Build contributions-with-comments dataset\n[bold]8[/bold] — Inspect parquet file\n[bold]9[/bold] — Run whole process\n[bold]10[/bold] — Export parquet file to Excel\n[bold]11[/bold] — Judge key messages\n[bold]q[/bold] — Quit",
             title="[bold cyan]DIPAS Analysis[/bold cyan]",
         ))
         choice = input("Select option: ").strip().lower()
         if choice in MENU_OPTIONS:
             return choice
-        console.print("[red]Invalid choice — enter 1, 2, 3, 4, 5, 6, 7, 8, 9, or q.[/red]")
+        console.print("[red]Invalid choice — enter 1-11 or q.[/red]")
 
 
 def main() -> None:
@@ -888,6 +1027,12 @@ def main() -> None:
         # run_whole_process is a coroutine driven by asyncio.run() from this
         # synchronous entry point.
         asyncio.run(run_whole_process())
+    elif choice == "10":
+        export_parquet_to_excel()
+    elif choice == "11":
+        # run_key_message_judge is a coroutine driven by asyncio.run() from this
+        # synchronous entry point.
+        asyncio.run(run_key_message_judge())
     else:
         console.print("[yellow]Goodbye.[/yellow]")
 
