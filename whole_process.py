@@ -132,6 +132,7 @@ class WholeProcess:
         stance_model_name: str,
         extraction_api_key: str = "",
         stance_api_key: str = "",
+        stance_enable_thinking: bool = True,
         prompt_config_path: str = "./prompts/config.json",
         prompt_key: str = "base",
         model_path: Path = MODEL_PATH,
@@ -157,6 +158,11 @@ class WholeProcess:
                 real key in from the environment.
             stance_api_key: API key forwarded to the stance-resolution LLM calls.
                 Defaults to an empty string for the same reason.
+            stance_enable_thinking: When True (default) stance LLM calls request
+                vLLM/Qwen's thinking-mode extension
+                (chat_template_kwargs.enable_thinking). Set False for
+                OpenAI-compatible backends/proxies (e.g. LiteLLM routing to
+                non-vLLM models) that reject that vLLM-specific field.
             prompt_config_path: Path to the stance prompt config JSON.
             prompt_key: Key within the config selecting the stance prompt.
             model_path: Directory holding the fine-tuned classifier weights.
@@ -167,6 +173,7 @@ class WholeProcess:
         self.stance_base_url = stance_base_url
         self.stance_model_name = stance_model_name
         self._stance_api_key = stance_api_key
+        self._stance_enable_thinking = stance_enable_thinking
         self._model_path = model_path
         self._stance_detector = StanceDetector()
         self._llm_handler = LLMHandler()
@@ -243,7 +250,7 @@ class WholeProcess:
             system=system,
             messages=messages,
             semaphore=semaphore,
-            enable_thinking=True,
+            enable_thinking=self._stance_enable_thinking,
             api_key=self._stance_api_key,
         )
         if result:

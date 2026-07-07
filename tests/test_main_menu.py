@@ -305,12 +305,14 @@ class FakeLLMHandler:
 
     call_results = []
     call_index = 0
+    enable_thinking_calls = []
 
     def __init__(self, *args, **kwargs):
         pass
 
     async def call_model(self, **kwargs):
         cls = type(self)
+        cls.enable_thinking_calls.append(kwargs.get("enable_thinking"))
         result = cls.call_results[cls.call_index]
         cls.call_index += 1
         return result
@@ -384,6 +386,63 @@ def test_run_stance_detection_runs_all_three_paths(monkeypatch, tmp_path):
     FakeLLMHandler.call_index = 0
     asyncio.run(main.run_stance_detection())
     assert FakeLLMHandler.call_index == 2
+
+
+def test_run_stance_detection_honors_enable_thinking(monkeypatch, tmp_path):
+    """run_stance_detection forwards main.STANCE_LLM_ENABLE_THINKING to every call.
+
+    Both the ensemble-path and plain-LLM-path call_model invocations must receive
+    the configured flag, so a LiteLLM/non-vLLM backend can suppress the
+    vLLM-specific thinking-mode extension.
+    """
+    import asyncio
+
+    # Row 2 forces an ensemble-path call; row 3 forces a plain-LLM-path call.
+    FakeStanceDetector.data = [
+        {
+            "row_index": 2,
+            "comment_text": "this is a much longer comment that exceeds the word limit easily",
+            "general_reaction_label": "ja",
+            "general_reaction_score": 0.99,
+            "gold_stance": "pro",
+        },
+        {
+            "row_index": 3,
+            "comment_text": "neutral text here",
+            "general_reaction_label": "nein",
+            "general_reaction_score": 0.1,
+            "gold_stance": "contra",
+        },
+    ]
+    monkeypatch.setattr(main, "StanceDetector", FakeStanceDetector)
+    monkeypatch.setattr(main, "LLMHandler", FakeLLMHandler)
+    monkeypatch.setattr(main, "StanceEvaluator", FakeEvaluator)
+    monkeypatch.setattr(
+        main, "write_markdown_report", lambda report, metadata: tmp_path / "report.md"
+    )
+    monkeypatch.setattr(
+        main,
+        "write_result_json",
+        lambda data, predictions, **kwargs: tmp_path / "result.json",
+    )
+
+    # Case 1: flag False -> both call sites forward enable_thinking=False.
+    monkeypatch.setattr(main, "STANCE_LLM_ENABLE_THINKING", False)
+    FakeLLMHandler.call_results = [{"stance": "pro"}, {"stance": "contra"}]
+    FakeLLMHandler.call_index = 0
+    FakeLLMHandler.enable_thinking_calls = []
+    asyncio.run(main.run_stance_detection())
+    assert FakeLLMHandler.call_index == 2
+    assert FakeLLMHandler.enable_thinking_calls == [False, False]
+
+    # Case 2: flag True -> both call sites forward enable_thinking=True.
+    monkeypatch.setattr(main, "STANCE_LLM_ENABLE_THINKING", True)
+    FakeLLMHandler.call_results = [{"stance": "pro"}, {"stance": "contra"}]
+    FakeLLMHandler.call_index = 0
+    FakeLLMHandler.enable_thinking_calls = []
+    asyncio.run(main.run_stance_detection())
+    assert FakeLLMHandler.call_index == 2
+    assert FakeLLMHandler.enable_thinking_calls == [True, True]
 
 
 # --- sample contributions ---

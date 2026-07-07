@@ -700,6 +700,76 @@ def test_extraction_and_stance_use_independent_configs(monkeypatch):
     assert set(result["stance_model_name"]) == {"stance-model"}
 
 
+def test_stance_enable_thinking_false_disables_thinking(monkeypatch):
+    """stance_enable_thinking=False forwards enable_thinking=False to the LLM."""
+    captured = {}
+
+    async def call_model(**kwargs):
+        captured.update(kwargs)
+        return {"stance": "in favor", "explanation": "reason"}
+
+    processor = WholeProcess(
+        extraction_base_url="http://extract-server/v1",
+        extraction_model_name="extract-model",
+        stance_base_url="http://stance-server/v1",
+        stance_model_name="stance-model",
+        stance_enable_thinking=False,
+    )
+    assert processor._stance_enable_thinking is False
+
+    processor._extractor = FakeExtractor(
+        [{"key_message": "km1", "key_message_type": "t", "explanation": "e"}]
+    )
+    # Default nein/0.5 classifier routes to the LLM path (not fast-path/ensemble).
+    processor._classifier = FakeClassifier()
+    monkeypatch.setattr(processor._llm_handler, "call_model", call_model)
+
+    df = pd.DataFrame(
+        {
+            "contribution_id": [1],
+            "contributionContent": ["Beitrag"],
+            "comments": [["a longer comment here"]],
+        }
+    )
+    asyncio.run(processor.run(df))
+
+    assert captured["enable_thinking"] is False
+
+
+def test_stance_enable_thinking_defaults_true(monkeypatch):
+    """Omitting stance_enable_thinking forwards enable_thinking=True (default)."""
+    captured = {}
+
+    async def call_model(**kwargs):
+        captured.update(kwargs)
+        return {"stance": "in favor", "explanation": "reason"}
+
+    processor = WholeProcess(
+        extraction_base_url="http://extract-server/v1",
+        extraction_model_name="extract-model",
+        stance_base_url="http://stance-server/v1",
+        stance_model_name="stance-model",
+    )
+    assert processor._stance_enable_thinking is True
+
+    processor._extractor = FakeExtractor(
+        [{"key_message": "km1", "key_message_type": "t", "explanation": "e"}]
+    )
+    processor._classifier = FakeClassifier()
+    monkeypatch.setattr(processor._llm_handler, "call_model", call_model)
+
+    df = pd.DataFrame(
+        {
+            "contribution_id": [1],
+            "contributionContent": ["Beitrag"],
+            "comments": [["a longer comment here"]],
+        }
+    )
+    asyncio.run(processor.run(df))
+
+    assert captured["enable_thinking"] is True
+
+
 # --- main.py wiring ------------------------------------------------------
 
 

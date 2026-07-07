@@ -56,6 +56,13 @@ EXTRACTION_LLM_API_KEY = os.getenv("EXTRACTION_LLM_API_KEY", LLM_API_KEY)
 STANCE_LLM_BASE_URL = os.getenv("STANCE_LLM_BASE_URL", LLM_BASE_URL)
 STANCE_LLM_MODEL_NAME = os.getenv("STANCE_LLM_MODEL_NAME", LLM_MODEL_NAME)
 STANCE_LLM_API_KEY = os.getenv("STANCE_LLM_API_KEY", LLM_API_KEY)
+# Whether stance detection requests vLLM/Qwen's "thinking mode" extension
+# (chat_template_kwargs.enable_thinking). Default true preserves the original
+# vLLM/Qwen behaviour; set false for OpenAI-compatible backends/proxies (e.g.
+# LiteLLM routing to non-vLLM models) that reject that vLLM-specific field.
+STANCE_LLM_ENABLE_THINKING = os.getenv(
+    "STANCE_LLM_ENABLE_THINKING", "true"
+).strip().lower() not in {"false", "0", "no"}
 
 # Judge-specific endpoint: the LLM-as-a-judge feature calls Claude via an
 # OpenAI-compatible gateway, not the self-hosted Qwen vLLM endpoint above.
@@ -220,7 +227,7 @@ async def run_stance_detection():
                     system=system,
                     messages=messages,
                     semaphore=semaphore,
-                    enable_thinking=True,
+                    enable_thinking=STANCE_LLM_ENABLE_THINKING,
                     api_key=STANCE_LLM_API_KEY,
                 )
                 predictions[item["row_index"]] = (
@@ -250,7 +257,7 @@ async def run_stance_detection():
                     system=system,
                     messages=messages,
                     semaphore=semaphore,
-                    enable_thinking=True,
+                    enable_thinking=STANCE_LLM_ENABLE_THINKING,
                     api_key=STANCE_LLM_API_KEY,
                 )
                 predictions[item["row_index"]] = (
@@ -686,6 +693,7 @@ async def run_whole_process() -> None:
         stance_model_name=STANCE_LLM_MODEL_NAME,
         extraction_api_key=EXTRACTION_LLM_API_KEY,
         stance_api_key=STANCE_LLM_API_KEY,
+        stance_enable_thinking=STANCE_LLM_ENABLE_THINKING,
     )
     result_df = await processor.run(df, proceeding_description="")
     result_df.to_parquet(output_path)
