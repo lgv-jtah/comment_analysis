@@ -364,6 +364,7 @@ def write_result_json(
     predictions: dict,
     output_dir: str = "results",
     timestamp: str | None = None,
+    stance_model_name: str | None = None,
 ) -> Path:
     """Write per-row results (gold + predicted stance) to a JSON file.
 
@@ -378,6 +379,10 @@ def write_result_json(
         output_dir: Directory to write into; created if absent.
         timestamp: UTC timestamp string used in the filename
             (``"%Y%m%dT%H%M%SZ"`` format). Defaults to the current UTC time.
+        stance_model_name: When provided, the full (unsanitized) stance model
+            name is recorded on every output row under ``stance_model_name`` for
+            provenance. When ``None`` (the default) no such key is added, so the
+            output is byte-for-byte identical to the pre-provenance behaviour.
 
     Returns:
         The :class:`Path` actually written.
@@ -396,6 +401,8 @@ def write_result_json(
     for row in gold_data:
         entry = dict(row)
         entry["predicted_stance"] = predictions.get(row["row_index"])
+        if stance_model_name is not None:
+            entry["stance_model_name"] = stance_model_name
         rows.append(entry)
     path.write_text(json.dumps(rows, ensure_ascii=False, indent=2))
     return path

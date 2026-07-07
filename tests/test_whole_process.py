@@ -57,7 +57,12 @@ class FakeExtractor:
 
 def _make_processor(monkeypatch, km_list, classifier=None, call_model=None):
     """Build a WholeProcess with all heavy collaborators replaced by fakes."""
-    processor = WholeProcess(base_url="http://testserver/v1", model_name="test-model")
+    processor = WholeProcess(
+        extraction_base_url="http://testserver/v1",
+        extraction_model_name="test-model",
+        stance_base_url="http://testserver/v1",
+        stance_model_name="test-model",
+    )
     processor._extractor = FakeExtractor(km_list)
     processor._classifier = classifier if classifier is not None else FakeClassifier()
 
@@ -580,13 +585,18 @@ def test_run_handles_nan_content(monkeypatch):
 
 
 def test_api_key_defaults_to_empty_string():
-    """A WholeProcess built without api_key stores an empty string (no secret)."""
-    processor = WholeProcess(base_url="http://testserver/v1", model_name="test-model")
-    assert processor._api_key == ""
+    """A WholeProcess built without api keys stores empty strings (no secret)."""
+    processor = WholeProcess(
+        extraction_base_url="http://testserver/v1",
+        extraction_model_name="test-model",
+        stance_base_url="http://testserver/v1",
+        stance_model_name="test-model",
+    )
+    assert processor._extraction_api_key == "" and processor._stance_api_key == ""
 
 
 def test_api_key_stored_and_forwarded(monkeypatch):
-    """api_key is stored and threaded into the stance-resolution LLM call."""
+    """api keys are stored and threaded into the respective LLM calls."""
     captured = {}
 
     async def call_model(**kwargs):
@@ -594,10 +604,15 @@ def test_api_key_stored_and_forwarded(monkeypatch):
         return {"stance": "in favor", "explanation": "reason"}
 
     processor = WholeProcess(
-        base_url="http://testserver/v1", model_name="test-model", api_key="tok"
+        extraction_base_url="http://testserver/v1",
+        extraction_model_name="test-model",
+        stance_base_url="http://testserver/v1",
+        stance_model_name="test-model",
+        extraction_api_key="tok",
+        stance_api_key="tok",
     )
-    assert processor._api_key == "tok"
-    # The extractor must receive the same key.
+    assert processor._stance_api_key == "tok"
+    # The extractor must receive the extraction key.
     assert processor._extractor._api_key == "tok"
 
     processor._extractor = FakeExtractor([{"key_message": "km1", "key_message_type": "t"}])
@@ -628,9 +643,61 @@ def test_init_does_not_load_classifier(monkeypatch):
 
     monkeypatch.setattr(whole_process, "ReactionClassifier", TrackingClassifier)
 
-    WholeProcess(base_url="http://testserver/v1", model_name="test-model")
+    WholeProcess(
+        extraction_base_url="http://testserver/v1",
+        extraction_model_name="test-model",
+        stance_base_url="http://testserver/v1",
+        stance_model_name="test-model",
+    )
 
     assert load_calls["n"] == 0
+
+
+def test_extraction_and_stance_use_independent_configs(monkeypatch):
+    """Extraction and stance each receive their own base_url/model_name/api_key."""
+    captured = {}
+
+    async def call_model(**kwargs):
+        captured.update(kwargs)
+        return {"stance": "in favor", "explanation": "reason"}
+
+    processor = WholeProcess(
+        extraction_base_url="http://extract-server/v1",
+        extraction_model_name="extract-model",
+        stance_base_url="http://stance-server/v1",
+        stance_model_name="stance-model",
+        extraction_api_key="extract-key",
+        stance_api_key="stance-key",
+    )
+
+    # (a) The extractor was built with the extraction config.
+    assert processor._extractor.base_url == "http://extract-server/v1"
+    assert processor._extractor.model_name == "extract-model"
+    assert processor._extractor._api_key == "extract-key"
+
+    processor._extractor = FakeExtractor(
+        [{"key_message": "km1", "key_message_type": "t", "explanation": "e"}]
+    )
+    processor._classifier = FakeClassifier()
+    monkeypatch.setattr(processor._llm_handler, "call_model", call_model)
+
+    df = pd.DataFrame(
+        {
+            "contribution_id": [1],
+            "contributionContent": ["Beitrag"],
+            "comments": [["a longer comment here"]],
+        }
+    )
+    result = asyncio.run(processor.run(df))
+
+    # (b) The stance call_model received the stance config.
+    assert captured["base_url"] == "http://stance-server/v1"
+    assert captured["model_name"] == "stance-model"
+    assert captured["api_key"] == "stance-key"
+
+    # (c) Output rows carry the correct provenance for each role.
+    assert set(result["extraction_model_name"]) == {"extract-model"}
+    assert set(result["stance_model_name"]) == {"stance-model"}
 
 
 # --- main.py wiring ------------------------------------------------------
@@ -710,7 +777,9 @@ def test_run_whole_process_happy_path(monkeypatch, tmp_data_dir):
 
     asyncio.run(main.run_whole_process())
 
-    output = tmp_data_dir / "whole_process_input.parquet"
+    extraction_slug = main._sanitize_model_name(main.EXTRACTION_LLM_MODEL_NAME)
+    stance_slug = main._sanitize_model_name(main.STANCE_LLM_MODEL_NAME)
+    output = tmp_data_dir / f"whole_process_input_{extraction_slug}_{stance_slug}.parquet"
     assert output.exists()
     written = pd.read_parquet(output)
     assert list(written.columns) == OUTPUT_COLUMNS
@@ -758,7 +827,9 @@ def test_run_whole_process_skips_on_overwrite_decline(monkeypatch, tmp_data_dir)
         }
     ).to_parquet(source)
 
-    output = tmp_data_dir / "whole_process_input.parquet"
+    extraction_slug = main._sanitize_model_name(main.EXTRACTION_LLM_MODEL_NAME)
+    stance_slug = main._sanitize_model_name(main.STANCE_LLM_MODEL_NAME)
+    output = tmp_data_dir / f"whole_process_input_{extraction_slug}_{stance_slug}.parquet"
     original = pd.DataFrame({"keep": [1]})
     original.to_parquet(output)
 

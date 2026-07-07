@@ -202,6 +202,29 @@ def test_write_result_json(tmp_path):
     # Original gold fields are preserved.
     assert data[0]["gold_stance"] == "in favor"
     assert data[1]["comment_text"] == "Okay."
+    # Backward compatibility: with no stance_model_name kwarg no such key is added.
+    assert "stance_model_name" not in data[0]
+    assert "stance_model_name" not in data[1]
+
+
+def test_write_result_json_includes_stance_model_name(tmp_path):
+    """When stance_model_name is passed, every row records it for provenance."""
+    gold_data = [
+        {"row_index": 0, "gold_stance": "in favor", "comment_text": "Great!"},
+        {"row_index": 1, "gold_stance": "neutral", "comment_text": "Okay."},
+    ]
+    predictions = {0: "in favor", 1: "neutral"}
+    path = write_result_json(
+        gold_data,
+        predictions,
+        output_dir=str(tmp_path),
+        timestamp="20260101T000000Z",
+        stance_model_name="Qwen/Qwen3-32B",
+    )
+    data = json.loads(path.read_text())
+    assert len(data) == 2
+    for entry in data:
+        assert entry["stance_model_name"] == "Qwen/Qwen3-32B"
 
 
 def _load_real_gold() -> list[dict]:

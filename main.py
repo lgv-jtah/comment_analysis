@@ -23,6 +23,7 @@ from contributions_with_comments_dataset import ContributionsWithCommentsDataset
 from whole_process import WholeProcess
 from dotenv import load_dotenv
 import os
+import re
 
 load_dotenv()
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
@@ -45,12 +46,23 @@ LLM_BASE_URL = "https://api.lyceum.technology/api/v2/external/serverless"
 # LLM_MODEL_NAME = "Qwen/Qwen3.5-27B-FP8"
 LLM_MODEL_NAME = "Qwen/Qwen3-32B"
 
+# Per-role model configuration. Key-message extraction and stance detection can
+# each target an independently configured LLM so different models can be
+# compared across roles. Each falls back to the shared LLM_* value above when its
+# dedicated environment variable is unset, so existing .env setups keep working.
+EXTRACTION_LLM_BASE_URL = os.getenv("EXTRACTION_LLM_BASE_URL", LLM_BASE_URL)
+EXTRACTION_LLM_MODEL_NAME = os.getenv("EXTRACTION_LLM_MODEL_NAME", LLM_MODEL_NAME)
+EXTRACTION_LLM_API_KEY = os.getenv("EXTRACTION_LLM_API_KEY", LLM_API_KEY)
+STANCE_LLM_BASE_URL = os.getenv("STANCE_LLM_BASE_URL", LLM_BASE_URL)
+STANCE_LLM_MODEL_NAME = os.getenv("STANCE_LLM_MODEL_NAME", LLM_MODEL_NAME)
+STANCE_LLM_API_KEY = os.getenv("STANCE_LLM_API_KEY", LLM_API_KEY)
+
 # Judge-specific endpoint: the LLM-as-a-judge feature calls Claude via an
 # OpenAI-compatible gateway, not the self-hosted Qwen vLLM endpoint above.
 # Unlike LLM_BASE_URL, this is sourced from the environment (not hardcoded)
 # because the gateway URL varies by deployment.
 JUDGE_LLM_BASE_URL = os.getenv("JUDGE_LLM_BASE_URL", "")
-JUDGE_LLM_MODEL_NAME = "claude-opus-4-8"
+JUDGE_LLM_MODEL_NAME = os.getenv("JUDGE_LLM_MODEL_NAME", "claude-opus-4-8")
 
 # Fast-path gate thresholds (see general_reaction_gate_konzept.md, Task 1.3).
 # NOTE: 0.6 is an interim placeholder, NOT a tuned production value. The
@@ -157,9 +169,9 @@ async def run_stance_detection():
         "./prompts/config.json", prompt_key
     )
 
-    base_url = LLM_BASE_URL
+    base_url = STANCE_LLM_BASE_URL
     # base_url = "http://10.200.160.182:5555/v1"
-    model_name = LLM_MODEL_NAME
+    model_name = STANCE_LLM_MODEL_NAME
 
     fast_path_count = 0
     ensemble_count = 0
@@ -209,7 +221,7 @@ async def run_stance_detection():
                     messages=messages,
                     semaphore=semaphore,
                     enable_thinking=True,
-                    api_key=LLM_API_KEY,
+                    api_key=STANCE_LLM_API_KEY,
                 )
                 predictions[item["row_index"]] = (
                     result.get("stance") if result else None
@@ -239,7 +251,7 @@ async def run_stance_detection():
                     messages=messages,
                     semaphore=semaphore,
                     enable_thinking=True,
-                    api_key=LLM_API_KEY,
+                    api_key=STANCE_LLM_API_KEY,
                 )
                 predictions[item["row_index"]] = (
                     result.get("stance") if result else None
@@ -284,8 +296,26 @@ async def run_stance_detection():
     report_path = write_markdown_report(report, metadata)
     console.print(f"Markdown report written to {report_path}")
 
-    result_path = write_result_json(data, predictions)
+    result_path = write_result_json(data, predictions, stance_model_name=STANCE_LLM_MODEL_NAME)
     console.print(f"[green]Result JSON written to[/green] {result_path}")
+
+
+def _sanitize_model_name(name: str) -> str:
+    """Turn a model name into a filesystem-safe slug for output filenames.
+
+    Strips every character outside ``[A-Za-z0-9]`` (collapsing runs to a single
+    ``-``) so a model name can never inject path separators or ``..`` into an
+    output filename. This is a security control, not just cosmetic.
+
+    Args:
+        name: The raw model name (e.g. ``"Qwen/Qwen3-32B"``).
+
+    Returns:
+        A slug containing only ``[A-Za-z0-9]`` and ``-`` separators, or the
+        literal ``"model"`` when the input has no usable characters.
+    """
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", name).strip("-")
+    return slug or "model"
 
 
 def _prompt_overwrite(path: Path) -> bool:
@@ -430,12 +460,17 @@ async def run_key_message_extraction() -> None:
 
     description = _prompt_proceeding_description()
 
-    output_path = DATA_DIR / f"key_messages_{source_path.stem}.parquet"
+    model_slug = _sanitize_model_name(EXTRACTION_LLM_MODEL_NAME)
+    output_path = DATA_DIR / f"key_messages_{source_path.stem}_{model_slug}.parquet"
     if output_path.exists() and not _prompt_overwrite(output_path):
         console.print("[yellow]Skipping extraction — existing file kept.[/yellow]")
         return
 
-    extractor = KeyMessageExtraction(base_url=LLM_BASE_URL, model_name=LLM_MODEL_NAME, api_key=LLM_API_KEY)
+    extractor = KeyMessageExtraction(
+        base_url=EXTRACTION_LLM_BASE_URL,
+        model_name=EXTRACTION_LLM_MODEL_NAME,
+        api_key=EXTRACTION_LLM_API_KEY,
+    )
     semaphore = asyncio.Semaphore(1)
 
     key_messages_col: list[list[dict] | None] = []
@@ -466,6 +501,9 @@ async def run_key_message_extraction() -> None:
     console.print(f"Total extraction time: {total_elapsed:.2f}s")
     result_df = df.copy()
     result_df["key_messages"] = key_messages_col
+    # Record the full (unsanitized) extraction model name as provenance so every
+    # output row is traceable to the model that produced it.
+    result_df["extraction_model_name"] = EXTRACTION_LLM_MODEL_NAME
     result_df.to_parquet(output_path)
     console.print(f"[green]Key messages saved to {output_path}[/green]")
 
@@ -634,12 +672,21 @@ async def run_whole_process() -> None:
                 f"available — using all.[/yellow]"
             )
 
-    output_path = DATA_DIR / f"whole_process_{source_path.stem}.parquet"
+    extraction_slug = _sanitize_model_name(EXTRACTION_LLM_MODEL_NAME)
+    stance_slug = _sanitize_model_name(STANCE_LLM_MODEL_NAME)
+    output_path = DATA_DIR / f"whole_process_{source_path.stem}_{extraction_slug}_{stance_slug}.parquet"
     if output_path.exists() and not _prompt_overwrite(output_path):
         console.print("[yellow]Skipping whole process — existing file kept.[/yellow]")
         return
 
-    processor = WholeProcess(base_url=LLM_BASE_URL, model_name=LLM_MODEL_NAME, api_key=LLM_API_KEY)
+    processor = WholeProcess(
+        extraction_base_url=EXTRACTION_LLM_BASE_URL,
+        extraction_model_name=EXTRACTION_LLM_MODEL_NAME,
+        stance_base_url=STANCE_LLM_BASE_URL,
+        stance_model_name=STANCE_LLM_MODEL_NAME,
+        extraction_api_key=EXTRACTION_LLM_API_KEY,
+        stance_api_key=STANCE_LLM_API_KEY,
+    )
     result_df = await processor.run(df, proceeding_description="")
     result_df.to_parquet(output_path)
     console.print(f"[green]Whole process saved to {output_path} — {len(result_df)} rows written[/green]")

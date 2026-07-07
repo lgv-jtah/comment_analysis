@@ -121,6 +121,31 @@ def test_prompt_overwrite_blank(monkeypatch, tmp_path):
     assert main._prompt_overwrite(tmp_path / "f.parquet") is False
 
 
+# --- _sanitize_model_name ---
+
+
+def test_sanitize_model_name_slashes_and_dots():
+    """Slashes collapse to single hyphens, keeping alphanumerics intact."""
+    assert main._sanitize_model_name("Qwen/Qwen3-32B") == "Qwen-Qwen3-32B"
+
+
+def test_sanitize_model_name_collapses_symbol_runs():
+    """Runs of slashes, dots, and colons collapse to a single hyphen each."""
+    assert main._sanitize_model_name("a/./:b") == "a-b"
+    assert main._sanitize_model_name("model.v1:2") == "model-v1-2"
+
+
+def test_sanitize_model_name_strips_leading_trailing():
+    """Leading/trailing separators are stripped, not left as hyphens."""
+    assert main._sanitize_model_name("/Qwen/") == "Qwen"
+
+
+def test_sanitize_model_name_all_symbols_maps_to_model():
+    """An all-symbol or empty input maps to the literal 'model'."""
+    assert main._sanitize_model_name("///...") == "model"
+    assert main._sanitize_model_name("") == "model"
+
+
 # --- fetch_contributions ---
 
 
@@ -341,7 +366,9 @@ def test_run_stance_detection_runs_all_three_paths(monkeypatch, tmp_path):
         main, "write_markdown_report", lambda report, metadata: tmp_path / "report.md"
     )
     monkeypatch.setattr(
-        main, "write_result_json", lambda data, predictions: tmp_path / "result.json"
+        main,
+        "write_result_json",
+        lambda data, predictions, **kwargs: tmp_path / "result.json",
     )
 
     # First run: ensemble succeeds, LLM fails — covers the ensemble success and
@@ -691,7 +718,8 @@ def test_run_key_message_extraction_happy_path(
 
     asyncio.run(main.run_key_message_extraction())
 
-    output = data_dir / "key_messages_input.parquet"
+    slug = main._sanitize_model_name(main.EXTRACTION_LLM_MODEL_NAME)
+    output = data_dir / f"key_messages_input_{slug}.parquet"
     assert output.exists()
     written = pd.read_parquet(output)
     assert "key_messages" in written.columns
@@ -700,6 +728,11 @@ def test_run_key_message_extraction_happy_path(
         fresh_extractor.extract_return,
     ]
     assert fresh_extractor.extract_calls == ["hello", "world"]
+    # Every row records the extraction model name for provenance.
+    assert list(written["extraction_model_name"]) == [
+        main.EXTRACTION_LLM_MODEL_NAME,
+        main.EXTRACTION_LLM_MODEL_NAME,
+    ]
 
 
 def test_run_key_message_extraction_handles_none_result(
@@ -720,7 +753,8 @@ def test_run_key_message_extraction_handles_none_result(
 
     asyncio.run(main.run_key_message_extraction())
 
-    output = data_dir / "key_messages_input.parquet"
+    slug = main._sanitize_model_name(main.EXTRACTION_LLM_MODEL_NAME)
+    output = data_dir / f"key_messages_input_{slug}.parquet"
     written = pd.read_parquet(output)
     assert written["key_messages"].isna().all()
 
@@ -774,7 +808,8 @@ def test_run_key_message_extraction_skips_on_overwrite_decline(
     source = data_dir / "input.parquet"
     pd.DataFrame({"contributionContent": ["hello"]}).to_parquet(source)
 
-    output = data_dir / "key_messages_input.parquet"
+    slug = main._sanitize_model_name(main.EXTRACTION_LLM_MODEL_NAME)
+    output = data_dir / f"key_messages_input_{slug}.parquet"
     original = pd.DataFrame({"keep": [1]})
     original.to_parquet(output)
 

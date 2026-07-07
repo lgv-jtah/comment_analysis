@@ -46,6 +46,8 @@ OUTPUT_COLUMNS = [
     "comment_text",
     "stance",
     "explanation",
+    "extraction_model_name",
+    "stance_model_name",
 ]
 
 
@@ -124,39 +126,58 @@ class WholeProcess:
 
     def __init__(
         self,
-        base_url: str,
-        model_name: str,
-        api_key: str = "",
+        extraction_base_url: str,
+        extraction_model_name: str,
+        stance_base_url: str,
+        stance_model_name: str,
+        extraction_api_key: str = "",
+        stance_api_key: str = "",
         prompt_config_path: str = "./prompts/config.json",
         prompt_key: str = "base",
         model_path: Path = MODEL_PATH,
     ) -> None:
         """Initialize the pipeline and load the stance prompt config.
 
-        The BERT reaction classifier is NOT loaded here (it is lazily loaded in
+        Key-message extraction and stance detection use independently configured
+        LLMs, so different models can be compared across the two roles. The BERT
+        reaction classifier is NOT loaded here (it is lazily loaded in
         :meth:`run`) so constructing a WholeProcess stays cheap and test-friendly.
 
         Args:
-            base_url: vLLM/OpenAI-compatible endpoint base URL.
-            model_name: Model identifier passed to the server.
-            api_key: API key forwarded to every LLM call (both key-message
-                extraction and stance resolution). Defaults to an empty string so
-                the pipeline can be constructed without a secret (e.g. in tests);
-                callers thread the real key in from the environment.
+            extraction_base_url: vLLM/OpenAI-compatible endpoint base URL for the
+                key-message extraction model.
+            extraction_model_name: Model identifier used for key-message
+                extraction.
+            stance_base_url: vLLM/OpenAI-compatible endpoint base URL for the
+                stance-detection model.
+            stance_model_name: Model identifier used for stance resolution.
+            extraction_api_key: API key forwarded to the key-message extraction
+                LLM calls. Defaults to an empty string so the pipeline can be
+                constructed without a secret (e.g. in tests); callers thread the
+                real key in from the environment.
+            stance_api_key: API key forwarded to the stance-resolution LLM calls.
+                Defaults to an empty string for the same reason.
             prompt_config_path: Path to the stance prompt config JSON.
             prompt_key: Key within the config selecting the stance prompt.
             model_path: Directory holding the fine-tuned classifier weights.
         """
-        self.base_url = base_url
-        self.model_name = model_name
-        self._api_key = api_key
+        self.extraction_base_url = extraction_base_url
+        self.extraction_model_name = extraction_model_name
+        self._extraction_api_key = extraction_api_key
+        self.stance_base_url = stance_base_url
+        self.stance_model_name = stance_model_name
+        self._stance_api_key = stance_api_key
         self._model_path = model_path
         self._stance_detector = StanceDetector()
         self._llm_handler = LLMHandler()
         self._prompt_config = self._stance_detector.load_prompt_config(
             prompt_config_path, prompt_key
         )
-        self._extractor = KeyMessageExtraction(base_url=base_url, model_name=model_name, api_key=api_key)
+        self._extractor = KeyMessageExtraction(
+            base_url=extraction_base_url,
+            model_name=extraction_model_name,
+            api_key=extraction_api_key,
+        )
         self._classifier = ReactionClassifier()
 
     def _classify_comment(self, comment_text: str) -> tuple[str, float]:
@@ -217,13 +238,13 @@ class WholeProcess:
 
         result = await self._llm_handler.call_model(
             client=client,
-            base_url=self.base_url,
-            model_name=self.model_name,
+            base_url=self.stance_base_url,
+            model_name=self.stance_model_name,
             system=system,
             messages=messages,
             semaphore=semaphore,
             enable_thinking=True,
-            api_key=self._api_key,
+            api_key=self._stance_api_key,
         )
         if result:
             return result.get("stance"), result.get("explanation"), path
@@ -392,6 +413,8 @@ class WholeProcess:
                                 "comment_text": comment_str,
                                 "stance": stance,
                                 "explanation": explanation,
+                                "extraction_model_name": self.extraction_model_name,
+                                "stance_model_name": self.stance_model_name,
                             }
                         )
                         rows_added += 1
