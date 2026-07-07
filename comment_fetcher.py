@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
-DEFAULT_DB_URL = "postgresql://dipas:dipas@localhost:5435/dipas"
+DEFAULT_DB_URL = "postgresql://dipas:dipas@localhost:5432/dipas"
 
 _COMMENTS_QUERY = text("""
     SELECT cfd.cid, comment_type, cfd.entity_id, cfc.field_comment_value
