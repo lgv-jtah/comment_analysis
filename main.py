@@ -497,6 +497,12 @@ async def run_key_message_extraction() -> None:
                 semaphore=semaphore,
             )
             iter_elapsed = time.time() - iter_start
+            # Contribution text is untrusted and may contain literal [ / ] that
+            # rich would misread as console markup, so escape() it. Truncate the
+            # RAW text first, then escape: escaping before slicing could split a
+            # markup escape sequence.
+            preview = contribution[:200] + "…" if len(contribution) > 200 else contribution
+            console.print(f"[{index}/{total}] [dim]{escape(preview)}[/dim]")
             if result is not None:
                 key_messages_col.append(result)
                 console.print(f"[{index}/{total}] {len(result)} key messages found ({iter_elapsed:.2f}s)")

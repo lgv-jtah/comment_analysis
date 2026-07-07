@@ -14,6 +14,7 @@ import httpx
 import numpy as np
 import pandas as pd
 from rich.console import Console
+from rich.markup import escape
 
 from classifier import ReactionClassifier
 from key_message_extractor import KeyMessageExtraction
@@ -332,6 +333,16 @@ class WholeProcess:
                 console.print(
                     f"[bold][{contrib_idx}/{total}] Contribution {contribution_id}[/bold]"
                 )
+                # Contribution text is untrusted and may contain literal [ / ]
+                # that rich would misread as console markup, so escape() it.
+                # Truncate the RAW text first, then escape the truncated result:
+                # escaping before slicing could split a markup escape sequence.
+                preview = (
+                    contribution_text[:200] + "…"
+                    if len(contribution_text) > 200
+                    else contribution_text
+                )
+                console.print(f"  [dim]↳ {escape(preview)}[/dim]")
 
                 # Step 1: key message extraction with timer.
                 km_start = time.time()

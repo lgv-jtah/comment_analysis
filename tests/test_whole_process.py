@@ -11,6 +11,7 @@ import asyncio
 
 import pandas as pd
 import pytest
+from rich.console import Console
 
 import main
 import whole_process
@@ -219,6 +220,27 @@ def test_run_flattens_rows(monkeypatch):
     expected_rs = {"km1": ["s1a", "s1b"], "km2": ["s2a"]}
     for _, row in result.iterrows():
         assert list(row["related_sentences"]) == expected_rs[row["key_message"]]
+
+
+def test_run_prints_contribution_preview(monkeypatch, capsys):
+    """WholeProcess.run prints the contribution text preview per contribution."""
+    km_list = [{"key_message": "km1", "key_message_type": "Wunsch"}]
+    processor = _make_processor(monkeypatch, km_list)
+    # Wide console so the preview line is never soft-wrapped across lines.
+    monkeypatch.setattr(whole_process, "console", Console(width=10_000))
+    marker = "distinctive preview marker text"
+    df = pd.DataFrame(
+        {
+            "contribution_id": [7],
+            "contributionContent": [marker],
+            "comments": [["c1"]],
+        }
+    )
+
+    asyncio.run(processor.run(df))
+
+    out = capsys.readouterr().out
+    assert marker in out
 
 
 def test_run_includes_related_sentences(monkeypatch):

@@ -7,6 +7,7 @@ choices. Tests that write files redirect ``main.DATA_DIR`` and
 """
 import pandas as pd
 import pytest
+from rich.console import Console
 
 import main
 
@@ -792,6 +793,37 @@ def test_run_key_message_extraction_happy_path(
         main.EXTRACTION_LLM_MODEL_NAME,
         main.EXTRACTION_LLM_MODEL_NAME,
     ]
+
+
+def test_run_key_message_extraction_prints_contribution_preview(
+    monkeypatch, tmp_paths, fresh_extractor, capsys
+):
+    """run_key_message_extraction prints a truncated preview per contribution."""
+    import asyncio
+
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    source = data_dir / "input.parquet"
+    short_text = "hello world preview marker"
+    long_text = "LONGMARKER " * 40  # >200 chars
+    assert len(long_text) > 200
+    pd.DataFrame({"contributionContent": [short_text, long_text]}).to_parquet(source)
+
+    # Use a wide console so the truncated preview is never soft-wrapped across
+    # lines (rich's default 80-column wrap would split the 200-char prefix).
+    monkeypatch.setattr(main, "console", Console(width=10_000))
+    monkeypatch.setattr(main, "KeyMessageExtraction", fresh_extractor)
+    answers = iter(["1", ""])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+
+    asyncio.run(main.run_key_message_extraction())
+
+    out = capsys.readouterr().out
+    # The short contribution appears verbatim in the preview line.
+    assert short_text in out
+    # The long contribution is truncated: prefix + ellipsis present, full text absent.
+    assert long_text[:200] + "…" in out
+    assert long_text not in out
 
 
 def test_run_key_message_extraction_handles_none_result(
