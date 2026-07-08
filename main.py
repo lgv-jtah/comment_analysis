@@ -521,6 +521,94 @@ async def run_key_message_extraction() -> None:
     console.print(f"[green]Key messages saved to {output_path}[/green]")
 
 
+def _is_whole_process_format(df: pd.DataFrame) -> bool:
+    """Detect whole_process's flattened (key_message x comment) output shape.
+
+    Extraction-format files (with a ``key_messages`` column) always take
+    precedence over this check — this only identifies files that lack
+    ``key_messages`` but carry whole_process's flattened per-comment columns.
+
+    Args:
+        df: The DataFrame loaded from the selected source parquet.
+
+    Returns:
+        ``True`` if the frame has no ``key_messages`` column but does carry the
+        ``key_message`` and ``contribution_id`` columns produced by
+        whole_process; ``False`` otherwise.
+    """
+    return (
+        "key_messages" not in df.columns
+        and "key_message" in df.columns
+        and "contribution_id" in df.columns
+    )
+
+
+def _group_whole_process_to_key_messages(df: pd.DataFrame) -> pd.DataFrame:
+    """Reconstruct a per-contribution key_messages view from whole_process output.
+
+    whole_process.py flattens one row per (key message x comment) pair, so the
+    same key message's fields repeat once per comment. This groups by
+    ``contribution_id`` and, for each contribution, deduplicates the repeated
+    rows back into a single ordered ``list[dict]`` of distinct key messages
+    (first-seen order), renaming ``key_message_explanation`` to ``explanation``
+    so each dict matches the shape :class:`KeyMessageJudge` expects (the same
+    shape produced by :func:`run_key_message_extraction`).
+    ``related_sentence_spans``, ``stance``, ``comment_text``, the (stance)
+    ``explanation`` column, and model-name columns are intentionally dropped —
+    they are either per-comment (no single correct value at the contribution
+    level) or unused by the judge.
+
+    Args:
+        df: A whole_process-format DataFrame (one row per key-message x comment
+            pair).
+
+    Returns:
+        A DataFrame with one row per contribution and the columns
+        ``contribution_id``, ``contributionContent``, and ``key_messages``.
+    """
+    records = []
+    # sort=False preserves the source file's first-seen contribution order in the
+    # output; dropna=False keeps any rows whose contribution_id is NaN rather than
+    # silently discarding them (pandas' groupby drops NaN keys by default).
+    for contribution_id, group in df.groupby("contribution_id", sort=False, dropna=False):
+        contribution_content = group["contributionContent"].iloc[0]
+        seen = {}
+        for _, row in group.iterrows():
+            km_text = str(row["key_message"])
+            km_type = str(row["key_message_type"])
+            explanation = str(row["key_message_explanation"])
+            raw_rs = row["related_sentences"]
+            # A missing related_sentences cell may be None or a scalar NaN; an
+            # array-valued cell has ndim > 0, so guard the pd.isna check with
+            # np.ndim to avoid its ambiguous-truth-value error on arrays.
+            related_sentences = (
+                []
+                if raw_rs is None or (np.ndim(raw_rs) == 0 and pd.isna(raw_rs))
+                else [str(s) for s in raw_rs]
+            )
+            # These four fields together are the key message's identity: text,
+            # type, explanation, and its set of related sentences. Two rows that
+            # match on all four are the same key message flattened across
+            # different comments, so keep only the first occurrence. (Message text
+            # alone is insufficient — distinct key messages can share wording.)
+            dedup_key = (km_text, km_type, explanation, tuple(related_sentences))
+            if dedup_key not in seen:
+                seen[dedup_key] = {
+                    "key_message": km_text,
+                    "key_message_type": km_type,
+                    "related_sentences": related_sentences,
+                    "explanation": explanation,
+                }
+        records.append(
+            {
+                "contribution_id": contribution_id,
+                "contributionContent": contribution_content,
+                "key_messages": list(seen.values()),
+            }
+        )
+    return pd.DataFrame(records)
+
+
 async def run_key_message_judge() -> None:
     """Judge the quality of already-extracted key messages in a parquet file.
 
@@ -541,8 +629,16 @@ async def run_key_message_judge() -> None:
         return
 
     df = pd.read_parquet(source_path)
-    if "key_messages" not in df.columns:
-        console.print("[red]Selected file is missing the 'key_messages' column.[/red]")
+    if "key_messages" in df.columns:
+        pass  # extraction-format: already has the shape the judge loop expects
+    elif _is_whole_process_format(df):
+        df = _group_whole_process_to_key_messages(df)
+    else:
+        console.print(
+            "[red]Selected file has neither a 'key_messages' column (extraction "
+            "output) nor whole_process's 'key_message'/'contribution_id' columns "
+            "— cannot judge.[/red]"
+        )
         return
     if "contributionContent" not in df.columns:
         console.print("[red]Selected file is missing the 'contributionContent' column.[/red]")

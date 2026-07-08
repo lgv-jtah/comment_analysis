@@ -1442,3 +1442,162 @@ def test_run_key_message_judge_skips_on_overwrite_decline(
 
     assert pd.read_parquet(output).equals(original)
     assert fresh_judge.judge_calls == []
+
+
+def _make_whole_process_df():
+    """Return a whole_process-format DataFrame with all OUTPUT_COLUMNS.
+
+    Contribution 1 has two key messages ("a"/"wish", "b"/"proposal"), each
+    repeated across two comments (4 rows). Contribution 2 has one key message
+    ("c") for one comment (1 row). Per-comment columns carry dummy values that
+    the reconstruction is expected to drop.
+
+    ``related_sentences`` is stored as a plain Python list so the parquet
+    round-trip hands it back as a numpy array (mirroring real whole_process
+    output). ``related_sentence_spans`` uses whole_process's nested
+    list-of-spans shape as a dummy value proving it is dropped.
+    """
+    rows = [
+        # contribution 1, key message "a", comment 1
+        dict(
+            contribution_id=1, contributionContent="c1",
+            key_message="a", key_message_type="wish",
+            related_sentences=["s1", "s2"],
+            related_sentence_spans=[[0, 2]],
+            key_message_explanation="expl-a",
+            comment_text="cm1", stance="pro", explanation="stance-expl-1",
+            extraction_model_name="ex-model", stance_model_name="st-model",
+        ),
+        # contribution 1, key message "a", comment 2 (same KM fields)
+        dict(
+            contribution_id=1, contributionContent="c1",
+            key_message="a", key_message_type="wish",
+            related_sentences=["s1", "s2"],
+            related_sentence_spans=[[0, 2]],
+            key_message_explanation="expl-a",
+            comment_text="cm2", stance="contra", explanation="stance-expl-2",
+            extraction_model_name="ex-model", stance_model_name="st-model",
+        ),
+        # contribution 1, key message "b", comment 1
+        dict(
+            contribution_id=1, contributionContent="c1",
+            key_message="b", key_message_type="proposal",
+            related_sentences=["s3"],
+            related_sentence_spans=[[3, 4]],
+            key_message_explanation="expl-b",
+            comment_text="cm1", stance="pro", explanation="stance-expl-3",
+            extraction_model_name="ex-model", stance_model_name="st-model",
+        ),
+        # contribution 1, key message "b", comment 2 (same KM fields)
+        dict(
+            contribution_id=1, contributionContent="c1",
+            key_message="b", key_message_type="proposal",
+            related_sentences=["s3"],
+            related_sentence_spans=[[3, 4]],
+            key_message_explanation="expl-b",
+            comment_text="cm2", stance="neutral", explanation="stance-expl-4",
+            extraction_model_name="ex-model", stance_model_name="st-model",
+        ),
+        # contribution 2, key message "c", comment 1
+        dict(
+            contribution_id=2, contributionContent="c2",
+            key_message="c", key_message_type="wish",
+            related_sentences=["s4"],
+            related_sentence_spans=[[0, 1]],
+            key_message_explanation="expl-c",
+            comment_text="cm3", stance="pro", explanation="stance-expl-5",
+            extraction_model_name="ex-model", stance_model_name="st-model",
+        ),
+    ]
+    return pd.DataFrame(rows)
+
+
+def test_run_key_message_judge_whole_process_format_reconstructs(
+    monkeypatch, tmp_paths, fresh_judge
+):
+    """run_key_message_judge accepts whole_process output, grouping to contributions."""
+    import asyncio
+
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    source = data_dir / "input.parquet"
+    # Write to parquet so related_sentences round-trips through numpy arrays.
+    _make_whole_process_df().to_parquet(source)
+
+    monkeypatch.setattr(main, "KeyMessageJudge", fresh_judge)
+    monkeypatch.setattr("builtins.input", lambda *a: "1")
+
+    asyncio.run(main.run_key_message_judge())
+
+    # One judge call per contribution (2), not per flattened row (5).
+    assert len(fresh_judge.judge_calls) == 2
+
+    # Contribution 1 forwards two key messages in first-seen order, a then b.
+    first_call = fresh_judge.judge_calls[0]
+    assert len(first_call) == 2
+    assert [km["key_message"] for km in first_call] == ["a", "b"]
+    for km in first_call:
+        assert set(km.keys()) == {
+            "key_message",
+            "key_message_type",
+            "related_sentences",
+            "explanation",
+        }
+        assert isinstance(km["related_sentences"], list)
+    # explanation is sourced from key_message_explanation, not the stance column.
+    assert first_call[0]["explanation"] == "expl-a"
+    assert first_call[1]["explanation"] == "expl-b"
+    assert first_call[0]["related_sentences"] == ["s1", "s2"]
+
+    output = data_dir / "judged_input.parquet"
+    assert output.exists()
+    written = pd.read_parquet(output)
+    assert "judge_result" in written.columns
+    # Two contribution-level rows, not the five flattened input rows.
+    assert len(written) == 2
+
+
+def test_group_whole_process_to_key_messages_dedups_and_renames():
+    """_group_whole_process_to_key_messages dedups, renames, and drops per-comment cols."""
+    df = _make_whole_process_df()
+
+    grouped = main._group_whole_process_to_key_messages(df)
+
+    # One row per contribution.
+    assert len(grouped) == 2
+    assert list(grouped.columns) == [
+        "contribution_id",
+        "contributionContent",
+        "key_messages",
+    ]
+
+    row1 = grouped.iloc[0]
+    assert row1["contribution_id"] == 1
+    assert row1["contributionContent"] == "c1"
+    kms1 = row1["key_messages"]
+    assert [km["key_message"] for km in kms1] == ["a", "b"]
+    assert kms1[0]["key_message_type"] == "wish"
+    assert kms1[0]["related_sentences"] == ["s1", "s2"]
+    assert kms1[0]["explanation"] == "expl-a"
+    assert set(kms1[0].keys()) == {
+        "key_message",
+        "key_message_type",
+        "related_sentences",
+        "explanation",
+    }
+
+    row2 = grouped.iloc[1]
+    assert row2["contribution_id"] == 2
+    assert [km["key_message"] for km in row2["key_messages"]] == ["c"]
+
+    # Per-comment / dropped columns are absent from the reconstructed frame.
+    for dropped in (
+        "related_sentence_spans",
+        "stance",
+        "comment_text",
+        "extraction_model_name",
+        "stance_model_name",
+        "key_message",
+        "key_message_type",
+    ):
+        assert dropped not in grouped.columns
