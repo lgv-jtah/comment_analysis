@@ -5,6 +5,8 @@ a local ``FakeDataset`` and ``builtins.input`` is monkeypatched to simulate user
 choices. Tests that write files redirect ``main.DATA_DIR`` and
 ``main.CONTRIBUTIONS_PATH`` into pytest's ``tmp_path``.
 """
+from pathlib import Path
+
 import pandas as pd
 import pytest
 from rich.console import Console
@@ -1601,3 +1603,232 @@ def test_group_whole_process_to_key_messages_dedups_and_renames():
         "key_message_type",
     ):
         assert dropped not in grouped.columns
+
+
+# --- compare judge results ---
+
+
+def _make_judgment(overall, completeness, semantic, viability):
+    """Return a KeyMessageJudgment-shaped dict with the given scores.
+
+    Each sub-dimension is nested under its own key with a ``score`` field,
+    mirroring the real judge output the comparison aggregates.
+    """
+    return {
+        "overall_score": overall,
+        "completeness": {"score": completeness},
+        "semantic_precision": {"score": semantic},
+        "downstream_viability": {"score": viability},
+    }
+
+
+def test_run_menu_returns_12(monkeypatch):
+    """run_menu returns "12" when the user selects option 12."""
+    monkeypatch.setattr("builtins.input", lambda *a: "12")
+    assert main.run_menu() == "12"
+
+
+def test_main_dispatches_to_compare_judge_results(monkeypatch):
+    """main routes choice "12" to run_compare_judge_results (synchronous)."""
+    monkeypatch.setattr(main, "run_menu", lambda: "12")
+    called = {"run": False}
+    monkeypatch.setattr(
+        main, "run_compare_judge_results", lambda: called.__setitem__("run", True)
+    )
+    main.main()
+    assert called["run"] is True
+
+
+def test_pick_judged_parquet_files_multi_select(monkeypatch, tmp_path):
+    """_pick_judged_parquet_files returns the two selected judged files in order."""
+    a = tmp_path / "judged_a.parquet"
+    b = tmp_path / "judged_b.parquet"
+    other = tmp_path / "other.parquet"
+    pd.DataFrame({"x": [1]}).to_parquet(a)
+    pd.DataFrame({"x": [2]}).to_parquet(b)
+    pd.DataFrame({"x": [3]}).to_parquet(other)
+
+    monkeypatch.setattr("builtins.input", lambda *a: "1,2")
+
+    result = main._pick_judged_parquet_files(tmp_path)
+    assert result == [a, b]
+    assert other not in result
+
+
+def test_pick_judged_parquet_files_all(monkeypatch, tmp_path):
+    """_pick_judged_parquet_files returns every judged file for input "all"."""
+    a = tmp_path / "judged_a.parquet"
+    b = tmp_path / "judged_b.parquet"
+    pd.DataFrame({"x": [1]}).to_parquet(a)
+    pd.DataFrame({"x": [2]}).to_parquet(b)
+
+    monkeypatch.setattr("builtins.input", lambda *a: "all")
+
+    assert main._pick_judged_parquet_files(tmp_path) == [a, b]
+
+
+def test_pick_judged_parquet_files_reprompts_on_bad_input(monkeypatch, tmp_path):
+    """_pick_judged_parquet_files re-prompts on non-integer and out-of-range input."""
+    a = tmp_path / "judged_a.parquet"
+    pd.DataFrame({"x": [1]}).to_parquet(a)
+
+    answers = iter(["x", "9", "1"])
+    calls = {"n": 0}
+
+    def fake_input(*a):
+        calls["n"] += 1
+        return next(answers)
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    assert main._pick_judged_parquet_files(tmp_path) == [a]
+    assert calls["n"] == 3
+
+
+def test_pick_judged_parquet_files_none_when_empty(monkeypatch, tmp_path):
+    """_pick_judged_parquet_files returns None without prompting when no files match."""
+    monkeypatch.setattr("builtins.input", lambda *a: pytest.fail("no input expected"))
+    # Directory exists but contains no judged_*.parquet files.
+    assert main._pick_judged_parquet_files(tmp_path) is None
+
+
+def test_summarize_judged_df_means():
+    """_summarize_judged_df averages each dimension over the judged rows."""
+    df = pd.DataFrame(
+        {
+            "judge_result": pd.Series(
+                [
+                    _make_judgment(4, 3, 5, 2),
+                    _make_judgment(2, 1, 3, 4),
+                    None,
+                ],
+                dtype="object",
+            )
+        }
+    )
+
+    summary = main._summarize_judged_df(df)
+    assert summary["total"] == 3
+    assert summary["judged"] == 2
+    assert summary["no_result"] == 1
+    assert summary["mean_overall"] == (4 + 2) / 2
+    assert summary["mean_completeness"] == (3 + 1) / 2
+    assert summary["mean_semantic_precision"] == (5 + 3) / 2
+    assert summary["mean_downstream_viability"] == (2 + 4) / 2
+
+
+def test_summarize_judged_df_all_none():
+    """_summarize_judged_df yields None means when no row was judged."""
+    df = pd.DataFrame(
+        {"judge_result": pd.Series([None, None], dtype="object")}
+    )
+
+    summary = main._summarize_judged_df(df)
+    assert summary["judged"] == 0
+    assert summary["no_result"] == 2
+    assert summary["mean_overall"] is None
+    assert summary["mean_completeness"] is None
+    assert summary["mean_semantic_precision"] is None
+    assert summary["mean_downstream_viability"] is None
+
+
+def test_summarize_judged_df_ignores_nonnumeric_and_missing_subdim():
+    """Non-numeric overall and a missing sub-dimension are excluded from means."""
+    df = pd.DataFrame(
+        {
+            "judge_result": pd.Series(
+                [
+                    # overall_score is a string; completeness key absent entirely.
+                    {
+                        "overall_score": "n/a",
+                        "semantic_precision": {"score": 4},
+                        "downstream_viability": {"score": 2},
+                    },
+                    _make_judgment(3, 5, 2, 4),
+                ],
+                dtype="object",
+            )
+        }
+    )
+
+    summary = main._summarize_judged_df(df)
+    assert summary["judged"] == 2
+    # First row's overall is non-numeric -> only the second contributes.
+    assert summary["mean_overall"] == 3
+    # First row lacks completeness -> only the second contributes.
+    assert summary["mean_completeness"] == 5
+    # Both rows contribute semantic and viability.
+    assert summary["mean_semantic_precision"] == (4 + 2) / 2
+    assert summary["mean_downstream_viability"] == (2 + 4) / 2
+
+
+def test_judge_model_label_prefers_column():
+    """_judge_model_label returns the single-valued extraction_model_name."""
+    df = pd.DataFrame(
+        {
+            "extraction_model_name": ["Qwen/Qwen3-32B", "Qwen/Qwen3-32B"],
+            "judge_result": [None, None],
+        }
+    )
+    label = main._judge_model_label(df, Path("judged_anything.parquet"))
+    assert label == "Qwen/Qwen3-32B"
+
+
+def test_judge_model_label_falls_back_to_filename():
+    """_judge_model_label strips the judged_ prefix when no model column exists."""
+    df = pd.DataFrame({"judge_result": [None]})
+    path = Path("judged_whole_process_x_Qwen-3.parquet")
+    assert main._judge_model_label(df, path) == "whole_process_x_Qwen-3"
+
+
+def test_run_compare_judge_results_end_to_end(monkeypatch, tmp_paths, tmp_path):
+    """run_compare_judge_results ranks files and writes a markdown report."""
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    # File A: extraction-format with a model column and high scores.
+    high = data_dir / "judged_model_a_run.parquet"
+    pd.DataFrame(
+        {
+            "extraction_model_name": ["model-a"],
+            "judge_result": pd.Series(
+                [_make_judgment(5, 5, 5, 5)], dtype="object"
+            ),
+        }
+    ).to_parquet(high)
+
+    # File B: whole-process-format (no model column) with lower scores.
+    low = data_dir / "judged_whole_process_y_model-b.parquet"
+    pd.DataFrame(
+        {
+            "judge_result": pd.Series(
+                [_make_judgment(1, 1, 1, 1)], dtype="object"
+            ),
+        }
+    ).to_parquet(low)
+
+    # chdir so the default reports/ directory lands under tmp_path.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("builtins.input", lambda *a: "all")
+
+    main.run_compare_judge_results()
+
+    reports = list((tmp_path / "reports").glob("*_judge_comparison.md"))
+    assert len(reports) == 1
+    content = reports[0].read_text(encoding="utf-8")
+    assert "model-a" in content
+    assert "whole_process_y_model-b" in content
+    # Higher mean_overall (model-a) ranks before the whole-process label.
+    assert content.index("model-a") < content.index("whole_process_y_model-b")
+
+
+def test_run_compare_judge_results_aborts_without_files(monkeypatch, tmp_paths, tmp_path):
+    """run_compare_judge_results returns early and writes nothing with no files."""
+    data_dir, _ = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("builtins.input", lambda *a: pytest.fail("no input expected"))
+
+    main.run_compare_judge_results()
+
+    assert not (tmp_path / "reports").exists()

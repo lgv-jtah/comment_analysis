@@ -7,6 +7,9 @@ from evaluator import (
     RunMetadata,
     write_markdown_report,
     format_markdown_report,
+    JudgeComparisonRow,
+    format_judge_comparison_report,
+    write_judge_comparison_report,
 )
 
 FIXED_TS = datetime(2026, 6, 17, 14, 23, 0, tzinfo=timezone.utc)
@@ -215,3 +218,110 @@ def test_utf8_content(tmp_path):
     text = path.read_text(encoding="utf-8")
     assert "ablehnung" in text
     assert "Überprüfung" in text
+
+
+# --- judge comparison report ---
+
+
+def _cmp_row(
+    label,
+    file_name="judged_x.parquet",
+    total=1,
+    judged=1,
+    no_result=0,
+    mean_overall=4.0,
+    mean_completeness=3.0,
+    mean_semantic_precision=5.0,
+    mean_downstream_viability=2.0,
+):
+    """Build a JudgeComparisonRow with sensible defaults for report tests."""
+    return JudgeComparisonRow(
+        label=label,
+        file_name=file_name,
+        total=total,
+        judged=judged,
+        no_result=no_result,
+        mean_overall=mean_overall,
+        mean_completeness=mean_completeness,
+        mean_semantic_precision=mean_semantic_precision,
+        mean_downstream_viability=mean_downstream_viability,
+    )
+
+
+def test_judge_comparison_filename_format(tmp_path):
+    rows = [_cmp_row("model-a")]
+    path = write_judge_comparison_report(
+        rows, output_dir=tmp_path, timestamp=FIXED_TS
+    )
+    assert path.name == "2026-06-17T142300Z_judge_comparison.md"
+
+
+def test_judge_comparison_no_overwrite(tmp_path):
+    rows = [_cmp_row("model-a")]
+    first = write_judge_comparison_report(
+        rows, output_dir=tmp_path, timestamp=FIXED_TS
+    )
+    first_content = first.read_text(encoding="utf-8")
+    second = write_judge_comparison_report(
+        rows, output_dir=tmp_path, timestamp=FIXED_TS
+    )
+    assert first != second
+    assert second.name == "2026-06-17T142300Z_judge_comparison-1.md"
+    # First file must be untouched by the second write.
+    assert first.read_text(encoding="utf-8") == first_content
+
+
+def test_judge_comparison_sections_and_rows():
+    rows = [
+        _cmp_row("model-a", mean_overall=4.5, mean_completeness=3.25),
+        _cmp_row(
+            "model-b",
+            mean_overall=None,
+            mean_completeness=None,
+            mean_semantic_precision=None,
+            mean_downstream_viability=None,
+            judged=0,
+            no_result=1,
+        ),
+    ]
+    md = format_judge_comparison_report(rows, FIXED_TS)
+    assert "# Key Message Judge Comparison" in md
+    assert "## Summary" in md
+    assert "## Per-file comparison" in md
+    # 9-column table header and separator.
+    assert (
+        "| Rank | Model / file | Judged | No result | Total | Completeness | "
+        "Semantic precision | Downstream viability | Overall |" in md
+    )
+    assert "| --- | --- | --- | --- | --- | --- | --- | --- | --- |" in md
+    assert "model-a" in md
+    assert "model-b" in md
+    # None means render as N/A; numeric means are formatted to 2 decimals.
+    assert "N/A" in md
+    assert "4.50" in md
+    assert "3.25" in md
+
+
+def test_judge_comparison_ranking_and_ties():
+    rows = [
+        _cmp_row("first"),
+        _cmp_row("second"),
+        _cmp_row("third"),
+    ]
+    md = format_judge_comparison_report(rows, FIXED_TS)
+    # Rank column matches input order 1, 2, 3.
+    assert "| 1 | first |" in md
+    assert "| 2 | second |" in md
+    assert "| 3 | third |" in md
+
+
+def test_judge_comparison_utf8_and_pipe_escaping(tmp_path):
+    rows = [_cmp_row("mödel|pipe")]
+    path = write_judge_comparison_report(
+        rows, output_dir=tmp_path, timestamp=FIXED_TS
+    )
+    # Written file is valid UTF-8.
+    text = path.read_text(encoding="utf-8")
+    assert "mödel" in text
+    # The literal pipe is escaped so the markdown table isn't broken.
+    assert "mödel\\|pipe" in text

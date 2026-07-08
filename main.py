@@ -1,7 +1,14 @@
 """Stance-detection entry point with the general-reaction fast-path gate."""
 from stance_detector import StanceDetector
 from llm_handler import LLMHandler
-from evaluator import StanceEvaluator, RunMetadata, write_markdown_report, write_result_json
+from evaluator import (
+    StanceEvaluator,
+    RunMetadata,
+    write_markdown_report,
+    write_result_json,
+    JudgeComparisonRow,
+    write_judge_comparison_report,
+)
 import httpx
 import asyncio
 import time
@@ -426,6 +433,219 @@ def _pick_parquet_file(data_dir: Path) -> Path | None:
             console.print(f"[red]Please enter a number between 1 and {len(files)}.[/red]")
             continue
         return files[choice - 1]
+
+
+def _pick_judged_parquet_files(data_dir: Path) -> list[Path] | None:
+    """Prompt the user to multi-select ``judged_*.parquet`` files from a directory.
+
+    Lists every ``judged_*.parquet`` file in ``data_dir`` as a numbered (1-based)
+    menu and reads a comma-separated selection, or the literal ``"all"`` (case-
+    insensitive) to select every file, re-prompting on invalid input.
+
+    Args:
+        data_dir: Directory to scan for ``judged_*.parquet`` files.
+
+    Returns:
+        The chosen files' :class:`~pathlib.Path` objects in selection order
+        (duplicates removed), or ``None`` if the directory does not exist or
+        contains no matching files.
+    """
+    if not data_dir.exists():
+        console.print(f"[red]No data directory found at {data_dir}.[/red]")
+        return None
+
+    files = sorted(data_dir.glob("judged_*.parquet"))
+    if not files:
+        console.print(f"[red]No judged_*.parquet files found in {data_dir}.[/red]")
+        return None
+
+    for number, file in enumerate(files, start=1):
+        # file.name is a filesystem name, not model output, but printing it as a
+        # separate argument keeps any stray rich-markup characters literal.
+        console.print(f"  {number}.", file.name)
+
+    while True:
+        raw = input("Select files (comma-separated numbers, or 'all'): ").strip()
+        if raw.lower() == "all":
+            return list(files)
+        tokens = [t.strip() for t in raw.split(",") if t.strip()]
+        if not tokens:
+            console.print("[red]Please enter at least one number, or 'all'.[/red]")
+            continue
+        indices = []
+        valid = True
+        for token in tokens:
+            try:
+                idx = int(token)
+            except ValueError:
+                console.print("[red]Please enter whole numbers separated by commas.[/red]")
+                valid = False
+                break
+            if not 1 <= idx <= len(files):
+                console.print(f"[red]Please enter numbers between 1 and {len(files)}.[/red]")
+                valid = False
+                break
+            indices.append(idx)
+        if not valid:
+            continue
+        seen = []
+        for idx in indices:
+            if idx not in seen:
+                seen.append(idx)
+        return [files[i - 1] for i in seen]
+
+
+def _summarize_judged_df(df: pd.DataFrame) -> dict:
+    """Aggregate one ``judged_*.parquet`` file's ``judge_result`` scores.
+
+    A ``judge_result`` cell is either a KeyMessageJudgment dict (judged) or
+    ``None`` (either failed or skipped at judge time — that distinction was only
+    an in-memory counter during the original judge run and was never persisted,
+    so both collapse to "no result" here).
+
+    Args:
+        df: A loaded ``judged_*.parquet`` DataFrame.
+
+    Returns:
+        A dict with total/judged/no_result counts and mean_overall/
+        mean_completeness/mean_semantic_precision/mean_downstream_viability,
+        each ``None`` if no row contributed a numeric value for that dimension.
+    """
+    total = len(df)
+    if "judge_result" not in df.columns:
+        return {
+            "total": total, "judged": 0, "no_result": total,
+            "mean_overall": None, "mean_completeness": None,
+            "mean_semantic_precision": None, "mean_downstream_viability": None,
+        }
+
+    overall_scores, completeness_scores, semantic_scores, viability_scores = [], [], [], []
+    judged = 0
+
+    def _numeric(value):
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+    for cell in df["judge_result"]:
+        if cell is None or (np.ndim(cell) == 0 and pd.isna(cell)):
+            continue
+        judged += 1
+        overall = cell.get("overall_score")
+        if _numeric(overall):
+            overall_scores.append(overall)
+        for key, bucket in (
+            ("completeness", completeness_scores),
+            ("semantic_precision", semantic_scores),
+            ("downstream_viability", viability_scores),
+        ):
+            score = (cell.get(key) or {}).get("score")
+            if _numeric(score):
+                bucket.append(score)
+
+    def _mean(values):
+        return sum(values) / len(values) if values else None
+
+    return {
+        "total": total,
+        "judged": judged,
+        "no_result": total - judged,
+        "mean_overall": _mean(overall_scores),
+        "mean_completeness": _mean(completeness_scores),
+        "mean_semantic_precision": _mean(semantic_scores),
+        "mean_downstream_viability": _mean(viability_scores),
+    }
+
+
+def _judge_model_label(df: pd.DataFrame, path: Path) -> str:
+    """Derive a display label for a judged file: extraction model or filename.
+
+    Prefers the ``extraction_model_name`` column (present on extraction-format
+    judged files) since it names the model precisely; falls back to the filename
+    stem with the ``judged_`` prefix stripped for whole-process-format files,
+    which don't carry that column but always embed the model slug in their
+    filename already (see :func:`_sanitize_model_name`).
+
+    Args:
+        df: A loaded ``judged_*.parquet`` DataFrame.
+        path: The file's path, used for the filename fallback.
+
+    Returns:
+        A human-readable label identifying the model/run.
+    """
+    if "extraction_model_name" in df.columns:
+        values = df["extraction_model_name"].dropna().unique()
+        if len(values) == 1:
+            return str(values[0])
+        if len(values) > 1:
+            return ", ".join(str(v) for v in values)
+    return path.stem.removeprefix("judged_")
+
+
+def run_compare_judge_results() -> None:
+    """Compare multiple ``judged_*.parquet`` files to rank extraction models.
+
+    Prompts the user to multi-select ``judged_*.parquet`` files, aggregates each
+    file's judge scores, prints a ranked Rich table (highest mean overall score
+    first), and writes a markdown comparison report to disk. Aborts early if no
+    files are selected.
+    """
+    paths = _pick_judged_parquet_files(DATA_DIR)
+    if paths is None:
+        return
+
+    rows = []
+    for path in paths:
+        df = pd.read_parquet(path)
+        summary = _summarize_judged_df(df)
+        label = _judge_model_label(df, path)
+        rows.append(
+            JudgeComparisonRow(
+                label=label,
+                file_name=path.name,
+                total=summary["total"],
+                judged=summary["judged"],
+                no_result=summary["no_result"],
+                mean_overall=summary["mean_overall"],
+                mean_completeness=summary["mean_completeness"],
+                mean_semantic_precision=summary["mean_semantic_precision"],
+                mean_downstream_viability=summary["mean_downstream_viability"],
+            )
+        )
+
+    # Stable sorts applied least-significant key first: label asc, then judged
+    # desc, then mean_overall desc (None treated as -inf so all-unjudged files
+    # rank last) — this fully determines order even when overall scores tie.
+    rows.sort(key=lambda r: r.label)
+    rows.sort(key=lambda r: r.judged, reverse=True)
+    rows.sort(
+        key=lambda r: r.mean_overall if r.mean_overall is not None else float("-inf"),
+        reverse=True,
+    )
+
+    def _fmt(value):
+        return "N/A" if value is None else f"{value:.2f}"
+
+    table = Table(title="Judge result comparison")
+    table.add_column("Model / file")
+    table.add_column("Judged")
+    table.add_column("No result")
+    table.add_column("Completeness")
+    table.add_column("Semantic precision")
+    table.add_column("Downstream viability")
+    table.add_column("Overall")
+    for row in rows:
+        table.add_row(
+            escape(row.label),
+            str(row.judged),
+            str(row.no_result),
+            _fmt(row.mean_completeness),
+            _fmt(row.mean_semantic_precision),
+            _fmt(row.mean_downstream_viability),
+            _fmt(row.mean_overall),
+        )
+    console.print(table)
+
+    report_path = write_judge_comparison_report(rows)
+    console.print(f"[green]Comparison report written to {report_path}[/green]")
 
 
 def _prompt_proceeding_description() -> str:
@@ -1131,7 +1351,7 @@ def create_contributions_with_comments_dataset() -> None:
         console.print(f"[red]Failed: {e}[/red]")
 
 
-MENU_OPTIONS = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "q"}
+MENU_OPTIONS = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "q"}
 
 
 def run_menu() -> str:
@@ -1140,17 +1360,17 @@ def run_menu() -> str:
     Loops until the user enters a valid option, re-prompting on bad input.
 
     Returns:
-        The selected option, one of "1"-"11" or "q".
+        The selected option, one of "1"-"12" or "q".
     """
     while True:
         console.print(Panel(
-            "[bold]1[/bold] — Fetch contributions\n[bold]2[/bold] — Run stance detection\n[bold]3[/bold] — Sample contributions\n[bold]4[/bold] — Extract key messages\n[bold]5[/bold] — Inspect key messages\n[bold]6[/bold] — Fetch contribution with comments\n[bold]7[/bold] — Build contributions-with-comments dataset\n[bold]8[/bold] — Inspect parquet file\n[bold]9[/bold] — Run whole process\n[bold]10[/bold] — Export parquet file to Excel\n[bold]11[/bold] — Judge key messages\n[bold]q[/bold] — Quit",
+            "[bold]1[/bold] — Fetch contributions\n[bold]2[/bold] — Run stance detection\n[bold]3[/bold] — Sample contributions\n[bold]4[/bold] — Extract key messages\n[bold]5[/bold] — Inspect key messages\n[bold]6[/bold] — Fetch contribution with comments\n[bold]7[/bold] — Build contributions-with-comments dataset\n[bold]8[/bold] — Inspect parquet file\n[bold]9[/bold] — Run whole process\n[bold]10[/bold] — Export parquet file to Excel\n[bold]11[/bold] — Judge key messages\n[bold]12[/bold] — Compare judge results\n[bold]q[/bold] — Quit",
             title="[bold cyan]DIPAS Analysis[/bold cyan]",
         ))
         choice = input("Select option: ").strip().lower()
         if choice in MENU_OPTIONS:
             return choice
-        console.print("[red]Invalid choice — enter 1-11 or q.[/red]")
+        console.print("[red]Invalid choice — enter 1-12 or q.[/red]")
 
 
 def main() -> None:
@@ -1190,6 +1410,10 @@ def main() -> None:
         # run_key_message_judge is a coroutine driven by asyncio.run() from this
         # synchronous entry point.
         asyncio.run(run_key_message_judge())
+    elif choice == "12":
+        # run_compare_judge_results is synchronous (no LLM/network calls), so it
+        # is called directly rather than driven by asyncio.run().
+        run_compare_judge_results()
     else:
         console.print("[yellow]Goodbye.[/yellow]")
 

@@ -65,6 +65,33 @@ class RunMetadata:
     notes: str | None = None
 
 
+@dataclass
+class JudgeComparisonRow:
+    """One file's aggregated judge scores for the comparison report.
+
+    Attributes:
+        label: Display label identifying the model/run (see main._judge_model_label).
+        file_name: The judged_*.parquet file's name, for traceability.
+        total: Total contribution rows in the file.
+        judged: Rows with a non-null judge_result.
+        no_result: Rows with a null judge_result (failed or skipped at judge time).
+        mean_overall: Mean overall_score across judged rows, or None if none.
+        mean_completeness: Mean completeness.score across judged rows, or None.
+        mean_semantic_precision: Mean semantic_precision.score, or None.
+        mean_downstream_viability: Mean downstream_viability.score, or None.
+    """
+
+    label: str
+    file_name: str
+    total: int
+    judged: int
+    no_result: int
+    mean_overall: float | None
+    mean_completeness: float | None
+    mean_semantic_precision: float | None
+    mean_downstream_viability: float | None
+
+
 def format_markdown_report(
     report: EvaluationReport, metadata: RunMetadata, timestamp: datetime
 ) -> str:
@@ -195,6 +222,88 @@ def write_markdown_report(
         counter += 1
 
     content = format_markdown_report(report, metadata, timestamp)
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def _fmt_mean(value: float | None) -> str:
+    """Render a mean score for markdown display, or "N/A" if absent."""
+    return "N/A" if value is None else f"{value:.2f}"
+
+
+def _escape_pipe(text: str) -> str:
+    """Escape literal pipe characters so they don't break a markdown table cell."""
+    return text.replace("|", "\\|")
+
+
+def format_judge_comparison_report(
+    rows: list[JudgeComparisonRow], timestamp: datetime
+) -> str:
+    """Render a judge-result comparison as a markdown document.
+
+    Args:
+        rows: Comparison rows, already sorted in display order.
+        timestamp: Generation time, shown in the header.
+
+    Returns:
+        The markdown document text, ending with a trailing newline.
+    """
+    lines = [
+        "# Key Message Judge Comparison",
+        "",
+        f"Generated: {timestamp.strftime('%Y-%m-%dT%H%M%SZ')}",
+        "",
+        "## Summary",
+        "",
+        f"- Files compared: {len(rows)}",
+        "",
+        "## Per-file comparison",
+        "",
+        "| Rank | Model / file | Judged | No result | Total | Completeness | "
+        "Semantic precision | Downstream viability | Overall |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for rank, row in enumerate(rows, start=1):
+        lines.append(
+            f"| {rank} | {_escape_pipe(row.label)} | {row.judged} | {row.no_result} | "
+            f"{row.total} | {_fmt_mean(row.mean_completeness)} | "
+            f"{_fmt_mean(row.mean_semantic_precision)} | "
+            f"{_fmt_mean(row.mean_downstream_viability)} | {_fmt_mean(row.mean_overall)} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def write_judge_comparison_report(
+    rows: list[JudgeComparisonRow],
+    output_dir: str = "reports",
+    timestamp: datetime | None = None,
+) -> Path:
+    """Write a judge-result comparison markdown report to disk without overwriting.
+
+    Args:
+        rows: Comparison rows, already sorted in display order.
+        output_dir: Directory to write into; created if absent.
+        timestamp: Generation time; defaults to the current UTC time.
+
+    Returns:
+        The Path actually written.
+    """
+    if timestamp is None:
+        timestamp = datetime.now(timezone.utc)
+
+    stamp = timestamp.strftime("%Y-%m-%dT%H%M%SZ")
+    slug = "judge_comparison"
+
+    directory = Path(output_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+
+    path = directory / f"{stamp}_{slug}.md"
+    counter = 1
+    while path.exists():
+        path = directory / f"{stamp}_{slug}-{counter}.md"
+        counter += 1
+
+    content = format_judge_comparison_report(rows, timestamp)
     path.write_text(content, encoding="utf-8")
     return path
 
