@@ -71,10 +71,14 @@ class SampleContributions:
         """Path the sample is written to.
 
         Returns:
-            A sibling of ``source_path`` named ``sample_<n>.parquet``.
+            A sibling of ``source_path``. When ``random_state`` is set the name
+            is ``sample_<n>_seed<random_state>.parquet`` so seeded runs don't
+            overwrite each other; otherwise it is ``sample_<n>.parquet``.
         """
         # Write next to the source file so the sample lives in the same data
         # directory it was drawn from, regardless of where source_path points.
+        if self.random_state is not None:
+            return self.source_path.parent / f"sample_{self.n}_seed{self.random_state}.parquet"
         return self.source_path.parent / f"sample_{self.n}.parquet"
 
     def load(self) -> pd.DataFrame:

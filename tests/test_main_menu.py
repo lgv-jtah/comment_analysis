@@ -527,6 +527,39 @@ def test_prompt_positive_int_reprompts_on_nonpositive(monkeypatch):
     assert main._prompt_positive_int("n: ") == 3
 
 
+def test_prompt_optional_non_negative_int_blank_returns_none(monkeypatch):
+    """_prompt_optional_non_negative_int returns None when the input is blank."""
+    monkeypatch.setattr("builtins.input", lambda *a: "   ")
+    assert main._prompt_optional_non_negative_int("seed: ") is None
+
+
+def test_prompt_optional_non_negative_int_valid(monkeypatch):
+    """_prompt_optional_non_negative_int returns the parsed integer for valid input."""
+    monkeypatch.setattr("builtins.input", lambda *a: "7")
+    assert main._prompt_optional_non_negative_int("seed: ") == 7
+
+
+def test_prompt_optional_non_negative_int_reprompts_on_nonnumeric(monkeypatch):
+    """_prompt_optional_non_negative_int re-prompts when the input is not a number."""
+    answers = iter(["abc", "7"])
+    calls = {"n": 0}
+
+    def fake_input(*a):
+        calls["n"] += 1
+        return next(answers)
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    assert main._prompt_optional_non_negative_int("seed: ") == 7
+    assert calls["n"] == 2
+
+
+def test_prompt_optional_non_negative_int_reprompts_on_negative(monkeypatch):
+    """_prompt_optional_non_negative_int re-prompts on negatives; zero is valid."""
+    answers = iter(["-1", "0"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+    assert main._prompt_optional_non_negative_int("seed: ") == 0
+
+
 def test_prompt_project_ids_comma_separated(monkeypatch):
     """_prompt_project_ids splits a comma-separated list and strips tokens."""
     monkeypatch.setattr("builtins.input", lambda *a: "A, B")
@@ -556,7 +589,7 @@ def test_sample_contributions_happy_path(
     pd.DataFrame({"project_id": ["A", "B"], "contribution_id": [1, 2]}).to_parquet(contrib_path)
 
     monkeypatch.setattr(main, "SampleContributions", fresh_sampler)
-    answers = iter(["A, B", "5"])
+    answers = iter(["A, B", "5", ""])
     monkeypatch.setattr("builtins.input", lambda *a: next(answers))
 
     main.sample_contributions()
@@ -566,6 +599,7 @@ def test_sample_contributions_happy_path(
     assert kwargs["project_ids"] == ["A", "B"]
     assert kwargs["n"] == 5
     assert kwargs["source_path"] == contrib_path
+    assert kwargs["random_state"] is None
 
 
 def test_sample_contributions_missing_file(
@@ -608,7 +642,7 @@ def test_sample_contributions_catches_valueerror(
 
     fresh_sampler.sample_raises = ValueError("boom")
     monkeypatch.setattr(main, "SampleContributions", fresh_sampler)
-    answers = iter(["A", "5"])
+    answers = iter(["A", "5", ""])
     monkeypatch.setattr("builtins.input", lambda *a: next(answers))
 
     # Should not raise.
@@ -626,12 +660,48 @@ def test_sample_contributions_catches_filenotfounderror(
 
     fresh_sampler.sample_raises = FileNotFoundError("gone")
     monkeypatch.setattr(main, "SampleContributions", fresh_sampler)
-    answers = iter(["A", "5"])
+    answers = iter(["A", "5", ""])
     monkeypatch.setattr("builtins.input", lambda *a: next(answers))
 
     # Should not raise.
     main.sample_contributions()
     assert fresh_sampler.sample_called is True
+
+
+def test_sample_contributions_passes_seed(
+    monkeypatch, tmp_paths, fresh_sampler
+):
+    """sample_contributions forwards a supplied seed as random_state."""
+    data_dir, contrib_path = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame({"project_id": ["A", "B"], "contribution_id": [1, 2]}).to_parquet(contrib_path)
+
+    monkeypatch.setattr(main, "SampleContributions", fresh_sampler)
+    answers = iter(["A, B", "5", "42"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+
+    main.sample_contributions()
+
+    _, kwargs = fresh_sampler.init_args
+    assert kwargs["random_state"] == 42
+
+
+def test_sample_contributions_blank_seed_is_none(
+    monkeypatch, tmp_paths, fresh_sampler
+):
+    """sample_contributions forwards random_state=None when the seed is blank."""
+    data_dir, contrib_path = tmp_paths
+    data_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame({"project_id": ["A", "B"], "contribution_id": [1, 2]}).to_parquet(contrib_path)
+
+    monkeypatch.setattr(main, "SampleContributions", fresh_sampler)
+    answers = iter(["A, B", "5", ""])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+
+    main.sample_contributions()
+
+    _, kwargs = fresh_sampler.init_args
+    assert kwargs["random_state"] is None
 
 
 # --- key message extraction ---

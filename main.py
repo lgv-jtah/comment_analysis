@@ -369,6 +369,31 @@ def _prompt_positive_int(prompt: str) -> int:
         return value
 
 
+def _prompt_optional_non_negative_int(prompt: str) -> int | None:
+    """Prompt for an optional non-negative integer, re-prompting on bad input.
+
+    Args:
+        prompt: The text shown to the user when asking for input.
+
+    Returns:
+        The parsed integer (zero or greater), or ``None`` if the user leaves the
+        input blank.
+    """
+    while True:
+        raw = input(prompt).strip()
+        if raw == "":
+            return None
+        try:
+            value = int(raw)
+        except ValueError:
+            console.print("[red]Please enter a whole number (or leave blank).[/red]")
+            continue
+        if value < 0:
+            console.print("[red]Please enter zero or a positive number (or leave blank).[/red]")
+            continue
+        return value
+
+
 def _prompt_project_ids(available_ids: list[str]) -> list[str]:
     """Prompt for the project IDs to sample, or all of them.
 
@@ -1140,9 +1165,10 @@ def export_parquet_to_excel() -> None:
 def sample_contributions() -> None:
     """Draw a random sample of contributions for chosen projects.
 
-    Loads the fetched contributions file, prompts for project IDs and a sample
-    size, then delegates to :class:`SampleContributions`. Aborts with a message
-    if the file is missing or lacks the ``project_id`` column.
+    Loads the fetched contributions file, prompts for project IDs, a sample
+    size, and an optional random seed for reproducibility, then delegates to
+    :class:`SampleContributions`. Aborts with a message if the file is missing
+    or lacks the ``project_id`` column.
     """
     if not CONTRIBUTIONS_PATH.exists():
         console.print(f"[red]No contributions file found at {CONTRIBUTIONS_PATH}. Run option 1 (Fetch contributions) first.[/red]")
@@ -1156,12 +1182,13 @@ def sample_contributions() -> None:
     available_ids = df["project_id"].astype(str).unique().tolist()
     ids = _prompt_project_ids(available_ids)
     n = _prompt_positive_int("Sample size (n): ")
+    seed = _prompt_optional_non_negative_int("Random seed for reproducibility (blank for random): ")
 
     try:
         # Pass source_path explicitly rather than relying on SampleContributions'
         # default: tests redirect main.CONTRIBUTIONS_PATH into tmp_path, and the
         # sampler must read the same file this function already validated above.
-        sampler = SampleContributions(project_ids=ids, n=n, source_path=CONTRIBUTIONS_PATH)
+        sampler = SampleContributions(project_ids=ids, n=n, source_path=CONTRIBUTIONS_PATH, random_state=seed)
         result_path = sampler.sample()
         console.print(f"[green]Sample written to {result_path}[/green]")
     except (FileNotFoundError, ValueError) as e:

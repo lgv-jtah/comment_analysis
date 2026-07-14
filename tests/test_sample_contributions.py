@@ -153,3 +153,26 @@ def test_string_coercion_of_ids(source_path):
 
 def test_default_source_path():
     assert SampleContributions(["A"], 1).source_path == CONTRIBUTIONS_PATH
+
+
+def test_output_path_includes_seed_when_set(source_path):
+    sampler = SampleContributions(
+        ["A"], n=3, source_path=source_path, random_state=99
+    )
+    assert sampler.output_path.name == "sample_3_seed99.parquet"
+
+
+def test_output_path_omits_seed_when_none(source_path):
+    sampler = SampleContributions(["A"], n=3, source_path=source_path)
+    assert sampler.random_state is None
+    assert sampler.output_path.name == "sample_3.parquet"
+
+
+def test_different_seeds_write_different_files(source_path):
+    first = SampleContributions(
+        ["A"], n=3, source_path=source_path, random_state=1
+    )
+    second = SampleContributions(
+        ["A"], n=3, source_path=source_path, random_state=2
+    )
+    assert first.output_path != second.output_path
