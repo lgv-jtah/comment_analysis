@@ -130,3 +130,62 @@ def test_build_messages_hint_with_format_map_branch(detector):
     assert "Kommentar: Das ist ein Kommentar" in content
     assert _HINT_PREFIX in content
     assert "Score: 0.85" in content
+
+
+# --- format_other_key_messages tests ---
+
+_OTHER_KM_NOTE = "(keine weiteren Kernaussagen in diesem Beitrag)"
+
+
+def test_format_other_key_messages_two_items():
+    rendered = StanceDetector.format_other_key_messages(["km one", "km two"])
+    assert rendered == "- km one\n- km two"
+
+
+def test_format_other_key_messages_none_returns_note():
+    assert StanceDetector.format_other_key_messages(None) == _OTHER_KM_NOTE
+
+
+def test_format_other_key_messages_empty_list_returns_note():
+    assert StanceDetector.format_other_key_messages([]) == _OTHER_KM_NOTE
+
+
+def test_format_other_key_messages_drops_empty_entries():
+    rendered = StanceDetector.format_other_key_messages(["", "km"])
+    assert rendered == "- km"
+    assert "None" not in rendered
+    # No empty bullet line leaked in.
+    assert "- \n" not in rendered
+    assert rendered.count("-") == 1
+
+
+def test_format_other_key_messages_all_empty_returns_note():
+    assert StanceDetector.format_other_key_messages(["", ""]) == _OTHER_KM_NOTE
+
+
+# --- build_messages other_key_messages substitution tests ---
+
+_OTHER_KM_TEMPLATE_CONFIG = {
+    "system": "system prompt",
+    "user_template": "Kommentar: $comment_text\nWeitere: $other_key_messages",
+    "format": "template",
+}
+
+
+def test_build_messages_substitutes_other_key_messages(detector):
+    _, messages = detector.build_messages(
+        _OTHER_KM_TEMPLATE_CONFIG, _ITEM, other_key_messages=["km1", "km2"]
+    )
+    content = messages[0]["content"]
+    assert "- km1" in content
+    assert "- km2" in content
+    # Substitution actually happened: the literal placeholder is gone.
+    assert "$other_key_messages" not in content
+
+
+def test_build_messages_other_key_messages_none_renders_note(detector):
+    _, messages = detector.build_messages(_OTHER_KM_TEMPLATE_CONFIG, _ITEM)
+    content = messages[0]["content"]
+    assert _OTHER_KM_NOTE in content
+    assert "None" not in content
+    assert "$other_key_messages" not in content

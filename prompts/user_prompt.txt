@@ -35,6 +35,7 @@ Gleiche Wörter, ähnliches Thema oder allgemeine thematische Nähe reichen nich
 * Ergänzung/Erweiterung = nur dann IN FAVOR, wenn sie die Kernaussage klar unterstützt.
 * Allgemeine Zustimmung wie "Richtig", "Genau", "Die Ansicht teile ich" allein reicht nicht für IN FAVOR. Nur wenn der Kommentar zusätzlich inhaltlich auf die spezifische Kernaussage eingeht, ist IN FAVOR gerechtfertigt.
 * Fragen, Hinweise, Zuständigkeitsverweise oder Verfahrensvorschläge = meistens NEUTRAL.
+* Wenn der Kommentar eine andere Kernaussage desselben Beitrags klarer trifft als die zu klassifizierende Kernaussage, dann NEUTRAL für die zu klassifizierende Kernaussage.
 * Bei Unsicherheit: NEUTRAL.
 
 ## Beispiele
@@ -78,6 +79,20 @@ Beispiel 8 – IN FAVOR:
 Kernaussage: Mehr Fahrradstellplätze werden benötigt.
 Kommentar: Genau, es gibt dort viel zu wenige Abstellmöglichkeiten.
 → Unterstützt die Kernaussage direkt. IN FAVOR.
+
+Beispiel 9 – NEUTRAL (andere Kernaussage betroffen):
+Kernaussage: Parkplätze für Autos fehlen.
+Weitere Kernaussagen im Beitrag: Mehr Fahrradstellplätze werden benötigt.
+Kommentar: Die Fahrräder stehen dort völlig ungeordnet, es braucht dringend geordnete Abstellmöglichkeiten.
+→ Der Kommentar bezieht sich klar auf die Fahrradstellplätze, nicht auf fehlende Autoparkplätze. Für diese Kernaussage: NEUTRAL.
+
+## Weitere Kernaussagen im selben Beitrag
+
+Der Kommentar stammt aus einem Beitrag, der noch weitere Kernaussagen enthalten kann. Diese lauten:
+
+$other_key_messages
+
+Falls der Kommentar inhaltlich klarer zu einer dieser weiteren Kernaussagen passt als zur unten zu klassifizierenden Kernaussage, lautet die Haltung zur unten zu klassifizierenden Kernaussage NEUTRAL.
 
 ## Zu klassifizierender Fall
 

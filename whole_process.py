@@ -208,6 +208,7 @@ class WholeProcess:
         comment_text: str,
         key_message: str,
         semaphore: asyncio.Semaphore,
+        other_key_messages: list[str] | None = None,
     ) -> tuple[str | None, str | None, str]:
         """Resolve the stance for one comment against one key message.
 
@@ -221,6 +222,9 @@ class WholeProcess:
             comment_text: Raw comment text.
             key_message: The key message the comment is evaluated against.
             semaphore: Concurrency guard for the LLM call.
+            other_key_messages: The contribution's other key-message texts,
+                surfaced to the LLM so it can answer NEUTRAL when the comment more
+                clearly addresses a sibling key message. Ignored on the fast path.
 
         Returns:
             A ``(stance, explanation, path)`` tuple. ``stance`` and
@@ -235,12 +239,17 @@ class WholeProcess:
         if should_ensemble_path(gr_label, gr_score, comment_text):
             hint = self._stance_detector.format_gr_hint(gr_score)
             system, messages = self._stance_detector.build_messages(
-                self._prompt_config, item, gr_hint=hint
+                self._prompt_config,
+                item,
+                gr_hint=hint,
+                other_key_messages=other_key_messages,
             )
             path = "ensemble"
         else:
             system, messages = self._stance_detector.build_messages(
-                self._prompt_config, item
+                self._prompt_config,
+                item,
+                other_key_messages=other_key_messages,
             )
             path = "llm"
 
@@ -364,9 +373,15 @@ class WholeProcess:
                     f"({km_elapsed:.2f}s)[/cyan]"
                 )
 
+                all_km_texts = [str(k.get("key_message", "")) for k in key_messages]
                 rows_added = 0
                 for km_idx, km in enumerate(key_messages, start=1):
                     km_text = str(km.get("key_message", ""))
+                    other_key_messages = [
+                        text
+                        for pos, text in enumerate(all_km_texts)
+                        if pos != km_idx - 1 and text
+                    ]
                     km_type = str(km.get("key_message_type", ""))
                     # Verbatim source sentences for this key message. This is
                     # untrusted model output, so coerce to a list of strings and
@@ -394,7 +409,13 @@ class WholeProcess:
                         step_start = time.time()
                         gr_label, gr_score = self._classify_comment(comment_str)
                         stance, explanation, path = await self._resolve_stance(
-                            client, gr_label, gr_score, comment_str, km_text, semaphore
+                            client,
+                            gr_label,
+                            gr_score,
+                            comment_str,
+                            km_text,
+                            semaphore,
+                            other_key_messages=other_key_messages,
                         )
                         step_elapsed = time.time() - step_start
 

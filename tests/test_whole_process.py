@@ -792,6 +792,108 @@ def test_stance_enable_thinking_defaults_true(monkeypatch):
     assert captured["enable_thinking"] is True
 
 
+# --- sibling key-message threading ---------------------------------------
+
+
+def test_run_llm_path_lists_sibling_key_messages(monkeypatch):
+    """The plain-LLM prompt for one km lists the contribution's *other* km texts.
+
+    For a 3-key-message contribution, the call classifying the 2nd key message
+    must list the 1st and 3rd key messages as siblings and must NOT list the 2nd
+    key message's own text as a sibling.
+    """
+    km_list = [
+        {"key_message": "AAAA erste Aussage", "key_message_type": "t", "explanation": "e"},
+        {"key_message": "BBBB zweite Aussage", "key_message_type": "t", "explanation": "e"},
+        {"key_message": "CCCC dritte Aussage", "key_message_type": "t", "explanation": "e"},
+    ]
+    contents: list[str] = []
+
+    async def call_model(**kwargs):
+        contents.append(kwargs["messages"][0]["content"])
+        return {"stance": "neutral", "explanation": "reason"}
+
+    # Default nein/0.5 classifier routes every pair to the plain-LLM path.
+    processor = _make_processor(monkeypatch, km_list, call_model=call_model)
+    df = pd.DataFrame(
+        {
+            "contribution_id": [1],
+            "contributionContent": ["Beitrag"],
+            "comments": [["a longer comment here"]],
+        }
+    )
+
+    asyncio.run(processor.run(df))
+
+    # One comment x three key messages => three calls, in km order.
+    assert len(contents) == 3
+    second = contents[1]  # the 2nd key message's prompt
+    assert "- AAAA erste Aussage" in second
+    assert "- CCCC dritte Aussage" in second
+    # The 2nd key message's own text must not appear as a sibling bullet.
+    assert "- BBBB zweite Aussage" not in second
+
+
+def test_run_ensemble_hint_and_siblings_coexist(monkeypatch):
+    """The ensemble prompt carries both the gr-hint and the sibling key messages."""
+    classifier = FakeClassifier()
+    classifier.result = {"label": "ja", "score": 0.9}
+    contents: list[str] = []
+
+    async def call_model(**kwargs):
+        contents.append(kwargs["messages"][0]["content"])
+        return {"stance": "in favor", "explanation": "reason"}
+
+    km_list = [
+        {"key_message": "AAAA erste Aussage", "key_message_type": "t", "explanation": "e"},
+        {"key_message": "CCCC dritte Aussage", "key_message_type": "t", "explanation": "e"},
+    ]
+    processor = _make_processor(
+        monkeypatch, km_list, classifier=classifier, call_model=call_model
+    )
+    long_comment = "word " * 6
+    df = pd.DataFrame(
+        {
+            "contribution_id": [1],
+            "contributionContent": ["Beitrag"],
+            "comments": [[long_comment]],
+        }
+    )
+
+    asyncio.run(processor.run(df))
+
+    first = contents[0]  # prompt for the 1st km; sibling is the 2nd km
+    # gr-hint text present (mirrors test_run_ensemble_hint_present).
+    assert "allgemeine positive Reaktion" in first
+    # Sibling key-message bullet present in the same prompt.
+    assert "- CCCC dritte Aussage" in first
+
+
+def test_run_single_key_message_renders_no_siblings_note(monkeypatch):
+    """A single-key-message contribution renders the fixed no-siblings note."""
+    km_list = [
+        {"key_message": "nur eine Aussage", "key_message_type": "t", "explanation": "e"}
+    ]
+    contents: list[str] = []
+
+    async def call_model(**kwargs):
+        contents.append(kwargs["messages"][0]["content"])
+        return {"stance": "neutral", "explanation": "reason"}
+
+    processor = _make_processor(monkeypatch, km_list, call_model=call_model)
+    df = pd.DataFrame(
+        {
+            "contribution_id": [1],
+            "contributionContent": ["Beitrag"],
+            "comments": [["a longer comment here"]],
+        }
+    )
+
+    asyncio.run(processor.run(df))
+
+    assert "(keine weiteren Kernaussagen in diesem Beitrag)" in contents[0]
+
+
 # --- main.py wiring ------------------------------------------------------
 
 

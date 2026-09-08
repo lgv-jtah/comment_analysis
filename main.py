@@ -29,6 +29,7 @@ from comment_fetcher import CommentFetcher
 from contributions_with_comments_dataset import ContributionsWithCommentsDataset
 from whole_process import WholeProcess
 from dotenv import load_dotenv
+from collections import defaultdict
 import os
 import re
 
@@ -177,6 +178,16 @@ async def run_stance_detection():
     llm_handler = LLMHandler()
 
     data = stance_detector.load_data()
+    # Build a per-contribution lookup of key_message_index -> key_message text so
+    # each row can see the *other* key messages of its own contribution. This lets
+    # the prompt route a comment to NEUTRAL when it more clearly addresses a
+    # sibling key message than the one currently being classified.
+    km_by_contrib: dict[object, dict] = defaultdict(dict)
+    for it in data:
+        cid = it.get("contribution_id")
+        kidx = it.get("key_message_index")
+        if cid is not None and kidx is not None:
+            km_by_contrib[cid][kidx] = it.get("key_message", "")
     # data = data[:DEBUG_ROW_LIMIT]  # DEBUG / TEMPORARY — see DEBUG_ROW_LIMIT above
     prompt_key = "base"
     prompt_config = stance_detector.load_prompt_config(
@@ -206,6 +217,15 @@ async def run_stance_detection():
             gr_label = item.get("general_reaction_label", "")
             gr_score = item.get("general_reaction_score", 0.0)
 
+            # Sibling key messages of this row's contribution (exclude this row's
+            # own key message by its index, and drop empty texts).
+            cid = item.get("contribution_id")
+            kidx = item.get("key_message_index")
+            siblings = km_by_contrib.get(cid, {})
+            other_key_messages = [
+                text for idx, text in siblings.items() if idx != kidx and text
+            ]
+
             if should_fast_path(gr_label, gr_score, comment_text):
                 result = {
                     "stance": FAST_PATH_STANCE,
@@ -225,7 +245,10 @@ async def run_stance_detection():
                 # general-reaction signal as a German hint on the user prompt.
                 hint = stance_detector.format_gr_hint(gr_score)
                 system, messages = stance_detector.build_messages(
-                    prompt_config=prompt_config, item=item, gr_hint=hint
+                    prompt_config=prompt_config,
+                    item=item,
+                    gr_hint=hint,
+                    other_key_messages=other_key_messages,
                 )
                 result = await llm_handler.call_model(
                     client=client,
@@ -255,7 +278,9 @@ async def run_stance_detection():
                     )
             else:
                 system, messages = stance_detector.build_messages(
-                    prompt_config=prompt_config, item=item
+                    prompt_config=prompt_config,
+                    item=item,
+                    other_key_messages=other_key_messages,
                 )
                 result = await llm_handler.call_model(
                     client=client,

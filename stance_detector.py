@@ -34,6 +34,27 @@ class StanceDetector:
             The hint text with $score substituted by the formatted score.
         """
         return GR_HINT_TEMPLATE.substitute(score=f"{score:.2f}")
+
+    @staticmethod
+    def format_other_key_messages(other_key_messages: list[str] | None) -> str:
+        """Render the sibling key messages of the same contribution for the prompt.
+
+        Args:
+            other_key_messages: The contribution's other key-message texts (may be
+                None, empty, or contain empty strings).
+
+        Returns:
+            A bullet-list string (one "- {km}" line per non-empty entry), or the
+            fixed German note "(keine weiteren Kernaussagen in diesem Beitrag)"
+            when there are no other key messages to show.
+        """
+        if not other_key_messages:
+            return "(keine weiteren Kernaussagen in diesem Beitrag)"
+        items = [km for km in other_key_messages if km]
+        if not items:
+            return "(keine weiteren Kernaussagen in diesem Beitrag)"
+        return "\n".join(f"- {km}" for km in items)
+
     def detect_stance(self, text: str, target: str):
         return None
 
@@ -94,7 +115,11 @@ class StanceDetector:
             }
 
     def build_messages(
-        self, prompt_config: dict, item: dict, gr_hint: str | None = None
+        self,
+        prompt_config: dict,
+        item: dict,
+        gr_hint: str | None = None,
+        other_key_messages: list[str] | None = None,
     ) -> tuple[str, list[dict]]:
         """Build system prompt and messages for a single stance evaluation.
 
@@ -105,6 +130,11 @@ class StanceDetector:
             item: A single gold-label row supplying template variables.
             gr_hint: Optional Ensemble-Path (Pfad 2) hint appended to the user
                 content; when None the user content is unchanged.
+            other_key_messages: Optional sibling key-message texts from the same
+                contribution, rendered into the ``$other_key_messages`` template
+                variable so the LLM can see which key message a comment more
+                clearly addresses. When None or empty, a fixed German note is
+                rendered instead (never a literal "None" or an empty block).
         """
         system = prompt_config["system"]
 
@@ -120,6 +150,7 @@ class StanceDetector:
             "contribution_text": item.get("contribution_text", ""),
             "key_message_index": str(item.get("key_message_index", "")),
             "key_message_type": item.get("key_message_type", ""),
+            "other_key_messages": self.format_other_key_messages(other_key_messages),
         }
 
         if prompt_config.get("format") == "template":

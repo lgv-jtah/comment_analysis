@@ -282,6 +282,7 @@ class FakeStanceDetector:
     """Network-free stand-in for ``stance_detector.StanceDetector``."""
 
     data = []
+    build_messages_calls = []
 
     def __init__(self, *args, **kwargs):
         pass
@@ -295,7 +296,10 @@ class FakeStanceDetector:
     def format_gr_hint(self, score):
         return f"hint:{score}"
 
-    def build_messages(self, *, prompt_config, item, gr_hint=None):
+    def build_messages(
+        self, *, prompt_config, item, gr_hint=None, other_key_messages=None
+    ):
+        type(self).build_messages_calls.append((item, other_key_messages))
         return "system", [{"role": "user", "content": item.get("comment_text", "")}]
 
 
@@ -446,6 +450,61 @@ def test_run_stance_detection_honors_enable_thinking(monkeypatch, tmp_path):
     asyncio.run(main.run_stance_detection())
     assert FakeLLMHandler.call_index == 2
     assert FakeLLMHandler.enable_thinking_calls == [True, True]
+
+
+def test_run_stance_detection_threads_sibling_key_messages(monkeypatch, tmp_path):
+    """run_stance_detection passes each row its contribution's *other* km texts.
+
+    Two rows share a contribution but have different key_message_index values, so
+    each row's build_messages call must receive the sibling's key_message text and
+    exclude its own.
+    """
+    import asyncio
+
+    FakeStanceDetector.data = [
+        {
+            "row_index": 1,
+            "contribution_id": 42,
+            "key_message_index": 0,
+            "key_message": "erste Aussage",
+            "comment_text": "neutral text here",
+            "general_reaction_label": "nein",
+            "general_reaction_score": 0.1,
+            "gold_stance": "neutral",
+        },
+        {
+            "row_index": 2,
+            "contribution_id": 42,
+            "key_message_index": 1,
+            "key_message": "zweite Aussage",
+            "comment_text": "neutral text here",
+            "general_reaction_label": "nein",
+            "general_reaction_score": 0.1,
+            "gold_stance": "neutral",
+        },
+    ]
+    FakeStanceDetector.build_messages_calls = []
+    monkeypatch.setattr(main, "StanceDetector", FakeStanceDetector)
+    monkeypatch.setattr(main, "LLMHandler", FakeLLMHandler)
+    monkeypatch.setattr(main, "StanceEvaluator", FakeEvaluator)
+    monkeypatch.setattr(
+        main, "write_markdown_report", lambda report, metadata: tmp_path / "report.md"
+    )
+    monkeypatch.setattr(
+        main,
+        "write_result_json",
+        lambda data, predictions, **kwargs: tmp_path / "result.json",
+    )
+
+    FakeLLMHandler.call_results = [{"stance": "neutral"}, {"stance": "neutral"}]
+    FakeLLMHandler.call_index = 0
+    asyncio.run(main.run_stance_detection())
+
+    calls = {item["row_index"]: others for item, others in FakeStanceDetector.build_messages_calls}
+    # Row 1 (index 0) sees only the second key message as a sibling.
+    assert calls[1] == ["zweite Aussage"]
+    # Row 2 (index 1) sees only the first key message as a sibling.
+    assert calls[2] == ["erste Aussage"]
 
 
 # --- sample contributions ---
