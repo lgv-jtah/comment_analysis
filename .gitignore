@@ -12,3 +12,9 @@ data/
 
 # Local secrets
 .env
+
+# Test/coverage artifacts
+.coverage
+
+# Fine-tuned classifier weights (large binary, not source)
+model_output/
