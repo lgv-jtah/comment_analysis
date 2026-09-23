@@ -145,26 +145,85 @@ failed run's predictions (all-`failed` rows) are kept at
 `dataset/experiments/screening_fold0_llama-31-405b-fp8_two_stage_verifier.parquet`
 as a record of the failure, not deleted.
 
+## Prompt tightening: scope-attribution `missing_context` trigger
+
+Investigated *why* `missing_context` fires before touching anything.
+Original two-stage run (mistral-nemo, no verifier) on the fold-0 subset:
+23 of 35 `needs_review` rows (66%) carried `missing_context`, concentrated
+in 6 of the subset's 40 comments (each comment maps to ~4 key-message
+rows, so 6 comments cost 23 rows).
+
+Reading the 6 flagged comments by hand: 2-3 are genuine reply/thread-context
+gaps ("Ich habe mich beim Ort vertan. Es geht um den nördlicheren Tunnel"
+-- clearly a correction referring to something not stated in the comment
+itself), but 2-3 are substantive, self-contained comments where the
+*content* is perfectly interpretable and the model was really just unsure
+*which specific key message* it targets (e.g. "Muss hier erst ein Kind
+angefahren werden bis die Politik endlich handelt?" -- a clear safety
+complaint, just not obviously tied to one key message over another). The
+prompt's old closing line, `"Bei Unsicherheit generell: unresolved."` (when
+uncertain generally: unresolved), is a blanket catch-all that doesn't
+distinguish "I lack context I'd need" from "I can't tell which key message
+this targets" -- and `policy.py` only ever consumes `uncertainty_flags`
+when `scope_type == UNRESOLVED`, so there was no cheaper way for the model
+to express partial confidence.
+
+**Change** (`prompts/scope_attribution_user.txt`): replaced the blanket
+catch-all with two explicit rules -- `unresolved` is reserved for cases
+where information genuinely absent from the comment text itself would be
+required (reply-context gaps, suspected sarcasm), and is explicitly *not*
+for target-mapping uncertainty on an otherwise-interpretable comment,
+which should get `target_specific`/`mixed_qualified` with the most
+plausible key-message mapping instead of a blanket punt.
+
+**Re-ran the identical two-stage/mistral-nemo/fold-0 configuration**
+(`dataset/experiments/screening_fold0_mistral-nemo_two_stage_v2prompt.parquet`)
+to isolate the effect:
+
+| | forced_choice_accuracy | accepted_accuracy | labelled_coverage | review_rate | missing_context rows |
+|---|---|---|---|---|---|
+| Before (original prompt) | 0.429 (51/119) | 0.560 (51/91) | 0.765 | 0.254 (35 review, 23 missing_context) | 23 / 6 comments |
+| After (tightened prompt) | 0.445 (53/119) | 0.552 (53/96) | 0.807 | 0.188 (26 review, 18 missing_context) | 18 / 5 comments |
+
+**Real but modest effect.** `missing_context` rows dropped 23->18 (5 of
+the newly-resolved fell one way or another rather than review), coverage
+rose, and forced_choice_accuracy improved slightly (+1.6pp) because fewer
+pairs are now automatically counted wrong via review-routing. But two of
+the three comments judged (by hand) as over-cautious were *still* flagged
+`missing_context` even after the rewrite -- the model's own uncertainty
+about target-mapping on those specific comments is apparently not just a
+wording artifact. accepted_accuracy is flat-to-slightly-down (0.560 ->
+0.552), so the newly-resolved rows are, on net, no more accurate than a
+coin flip -- this is not a case of "unlocking easy correct answers," more
+"trading abstention for a forced (roughly 50/50) guess." **Not a
+decisive fix.** A separate, untouched failure mode --
+`evidence_not_substring_of_comment` / `invalid_scope_output` /
+`invalid_stance_output` (~16 rows, structured-output evidence-grounding
+rejections) -- is now proportionally a larger share of remaining review
+routing than before, and hasn't been investigated yet.
+
 ## Status
 
-**Not yet decided which direction to pursue.** Two independent findings
-both point the same way: the new policy-v2 architecture, across every
-variant and every model tried so far, underperforms the historical
-baseline on this screening subset, for reasons that are prompt/data
-issues rather than model-choice issues (see root-cause breakdown above).
-Adding Llama 3.3 70B / Mistral Small 24B to the comparison (via a
-LiteLLM config change) would not resolve either root cause -- it's a
-separate, lower-priority axis. Candidate next steps, not yet started:
-- Tighten the scope-attribution prompt's `missing_context` trigger
-  (currently fires on ordinary short replies with no parent-context
-  signal at all, which may be over-conservative given
-  `parent_context.available` is always `False` anyway -- the model has
-  no way to *not* be missing that context).
+**Still not decided which direction to pursue.** Three independent
+findings all point the same way: the new policy-v2 architecture, across
+every variant, every model, and this first prompt iteration, remains well
+below the historical baseline (best result so far: gptoss-120b verifier
+variant at 0.602 accepted_accuracy vs. 0.748 historical). Remaining
+untried levers, in rough order of expected leverage:
+- Investigate the `evidence_not_substring_of_comment` /
+  `invalid_scope_output` / `invalid_stance_output` review-routing cluster
+  (~16 of 26 remaining review rows in the latest run) -- unlike
+  `missing_context`, this hasn't been root-caused at all yet. It may be a
+  genuine evidence-grounding strictness issue, a prompt-formatting issue,
+  or something else.
 - Decide how to report the general-approval/historical-label divergence
   in the final report: as brief section 3 requires, report both numbers
-  (against-historical and policy-compliant) rather than picking one.
-- Only after one of the above is addressed, re-run the fold-0 screening
-  comparison to confirm improvement, then proceed to the full-cohort
-  comparison and (separately, cross-repo) provisioning Llama 3.3 70B /
-  Mistral Small 24B on the LiteLLM proxy if a broader model sweep is
-  still wanted at that point.
+  (against-historical and policy-compliant) rather than picking one --
+  this alone would recover a meaningful chunk of the apparent gap without
+  any further code/prompt change, since some of what's currently scored
+  "wrong" is the policy correctly doing what it was specified to do.
+- Only after the evidence-grounding cluster is understood, re-run the
+  fold-0 screening comparison to confirm cumulative improvement, then
+  proceed to the full-cohort comparison and (separately, cross-repo)
+  provisioning Llama 3.3 70B / Mistral Small 24B on the LiteLLM proxy if
+  a broader model sweep is still wanted at that point.

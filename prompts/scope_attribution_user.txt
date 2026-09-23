@@ -19,8 +19,8 @@ Wenn scope_type = mixed_qualified: Entscheide zusätzlich, ob die allgemeine Zus
 * Ein direkter Reply-Kommentar auf einen anderen Kommentar ist NICHT automatisch eine Zustimmung zum ursprünglichen Beitrag.
 * Bestätigung eines Problems ist nicht automatisch Zustimmung zu einer bestimmten Lösung.
 * Bloße thematische Nähe oder gleiche Wörter begründen keinen Bezug.
-* Bei Unsicherheit über Sarkasmus, unauflösbare Verweise, oder fehlenden Kontext: unresolved, mit passendem uncertainty_flag (z. B. "suspected_sarcasm", "unresolved_reply_reference", "missing_context").
-* Bei Unsicherheit generell: unresolved.
+* "unresolved" ist ausschließlich für Fälle gedacht, in denen Informationen fehlen, die der Kommentartext selbst nicht liefert und die für eine Bewertung zwingend nötig wären -- z. B. ein unauflösbarer Verweis auf etwas außerhalb des Kommentars ("Siehe oben", "Ich habe mich beim Ort vertan, es geht um X" ohne dass X hier erklärt wird), oder vermuteter Sarkasmus, der die Aussage ins Gegenteil verkehren würde. Passendes uncertainty_flag setzen (z. B. "suspected_sarcasm", "unresolved_reply_reference", "missing_context").
+* "unresolved" ist NICHT dafür gedacht, dass du unsicher bist, WELCHE Kernaussage(n) konkret gemeint sind, wenn der Kommentar inhaltlich für sich verständlich ist. Ein eigenständiger, verständlicher Kommentar (z. B. eine Meinungsäußerung, eine Frage, eine Beobachtung) bekommt target_specific oder mixed_qualified mit der plausibelsten Zuordnung zu den betroffenen Kernaussagen -- auch wenn die Zuordnung nicht hundertprozentig sicher ist. Eine vertretbare Zuordnung ist besser als ein pauschales unresolved.
 
 ## Beitrag
 
