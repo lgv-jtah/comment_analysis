@@ -154,6 +154,52 @@ def test_evaluate_command_writes_json_output(tmp_path):
     data = json.loads(output_path.read_text(encoding="utf-8"))
     assert "metrics" in data
     assert data["metrics"]["eligible_pairs"] == 2
+    assert data["accepted_accuracy_by_basis"] == {}
+
+
+def test_evaluate_command_json_output_includes_basis_breakdown(tmp_path):
+    reference = pd.DataFrame(
+        [
+            {"pair_id": "p1", "contribution_id": "1", "resolution_status": "resolved", "reference_label": "neutral"},
+        ]
+    )
+    reference_path = tmp_path / "pairs.parquet"
+    reference.to_parquet(reference_path)
+
+    predictions = pd.DataFrame(
+        [
+            {
+                "pair_id": "p1",
+                "contribution_id": "1",
+                "status": "accepted",
+                "proposed_stance": "in_favor",
+                "final_stance": "in_favor",
+                "basis": "general_approval",
+            },
+        ]
+    )
+    predictions_path = tmp_path / "predictions.parquet"
+    predictions.to_parquet(predictions_path)
+    output_path = tmp_path / "metrics.json"
+
+    cli.main(
+        [
+            "evaluate",
+            "--predictions",
+            str(predictions_path),
+            "--reference",
+            str(reference_path),
+            "--folds",
+            str(tmp_path / "no_such_folds.json"),
+            "--output",
+            str(output_path),
+        ]
+    )
+
+    data = json.loads(output_path.read_text(encoding="utf-8"))
+    assert data["accepted_accuracy_by_basis"] == {
+        "general_approval": {"n": 1, "correct": 0, "accuracy": 0.0}
+    }
 
 
 def test_evaluate_command_prints_basis_breakdown_when_basis_column_present(tmp_path, capsys):

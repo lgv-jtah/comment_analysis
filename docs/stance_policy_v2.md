@@ -103,6 +103,57 @@ An optional verifier stage makes one independent assessment of the same
 context (never shown the primary's answer, no recursive loop) and routes to
 review on any scope or per-target disagreement.
 
+## Reporting: general-approval accuracy against historical labels
+
+Brief section 3: "Existing annotations do not fully match the new
+general-approval policy. Report results against historical labels
+separately from policy-compliance checks. Do not present a
+policy-adjusted or selectively filtered score as an independently
+human-validated 80% result." This section makes that concrete, based on
+what Phase 5's screening investigation actually found
+(`docs/phase5_screening_results.md`).
+
+**The problem this addresses**: rule 3 above (general approval propagates
+to every key message) is this pipeline's own explicit design decision. The
+historical human annotation (Antonie's dataset, `dataset/pairs.parquet`)
+predates it and does not apply it -- she scored blanket-agreement comments
+("Stimmt.", "In der Tat.") per key message and typically used `neutral`
+when a comment didn't specifically address that key message, even amid
+clear general positive sentiment. Scoring `basis=general_approval`
+predictions against those labels therefore measures policy-label
+*disagreement*, not model error. Confirmed empirically: on the fold-0
+screening cohort, `general_approval`-basis accepted predictions scored
+0.111 against historical labels, while every other basis combined scored
+0.718 -- close to the historical baseline's own 0.748 on the same fold.
+
+**The reporting rule**: any accuracy number reported for a policy-v2 run
+must be accompanied by the `basis` breakdown
+(`evaluator_v2.accepted_accuracy_by_basis()`, printed automatically by
+`cli.py evaluate`/`benchmark` as an "Accepted accuracy by basis" table),
+not just the single blended `accepted_accuracy`/`forced_choice_accuracy`
+figure. Two views, always shown together, never one presented as the
+other:
+
+1. **Against historical labels, unmodified** -- the existing
+   `accepted_accuracy`/`forced_choice_accuracy` fields, exactly as scored
+   today. This is what "is the 80% goal met on the historical cohort"
+   must ultimately be judged against, per brief section 10 step 6 --
+   there is no other independently human-validated reference to use, and
+   general-approval predictions are real predictions the pipeline will
+   make in production, not excluded.
+2. **By basis** -- the same accuracy, split by `basis`, so a reader can
+   see exactly how much of any gap (or any improvement) is attributable
+   to the general-approval/historical-label divergence rather than to
+   overall prediction quality.
+
+**What this reporting rule explicitly forbids**: computing a single
+number that excludes or reweights `general_approval`-basis pairs and
+presenting *that* as "the" accuracy, the 80%-goal number, or an
+independently validated result. The 0.718 figure above is informative
+context for *why* the blended number is lower than the historical
+baseline; it is not a replacement for the blended number, and Phase 7's
+final report must show both, not just the more favorable one.
+
 ## Known limitation: parent context
 
 `comment_fetcher.py`'s query filters `WHERE comment_type = 'default'` and

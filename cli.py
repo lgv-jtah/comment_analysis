@@ -121,16 +121,16 @@ def _print_metrics(title: str, metrics: evaluator_v2.EvaluationMetricsV2) -> Non
         console.print(table)
 
 
-def _print_basis_breakdown(predictions: pd.DataFrame, reference: pd.DataFrame) -> None:
+def _print_basis_breakdown(by_basis: dict[str, evaluator_v2.BasisMetrics]) -> None:
     """Print accepted accuracy split by `basis` (brief section 3).
 
     Historical reference labels predate the general-approval-propagation
     policy, so basis="general_approval" predictions routinely disagree
     with them for reasons unrelated to prediction quality -- see
+    docs/stance_policy_v2.md's "Reporting" section and
     docs/phase5_screening_results.md. Printed after every metrics report
     so this split is never missed rather than requiring ad-hoc analysis.
     """
-    by_basis = evaluator_v2.accepted_accuracy_by_basis(predictions, reference)
     if not by_basis:
         return
     table = Table(title="Accepted accuracy by basis (brief section 3: report separately)")
@@ -141,6 +141,12 @@ def _print_basis_breakdown(predictions: pd.DataFrame, reference: pd.DataFrame) -
     for basis, bm in sorted(by_basis.items()):
         table.add_row(basis, str(bm.n), str(bm.correct), f"{bm.accuracy:.3f}")
     console.print(table)
+
+
+def _basis_breakdown_to_json_dict(by_basis: dict[str, evaluator_v2.BasisMetrics]) -> dict:
+    return {
+        basis: {"n": bm.n, "correct": bm.correct, "accuracy": bm.accuracy} for basis, bm in by_basis.items()
+    }
 
 
 def _asdict_class_metrics(cm: evaluator_v2.ClassMetrics) -> dict:
@@ -184,7 +190,8 @@ def _run_evaluate(args: argparse.Namespace) -> None:
         result_for_output = evaluator_v2.evaluate(predictions, reference)
         _print_metrics("Overall", result_for_output)
 
-    _print_basis_breakdown(predictions, reference)
+    by_basis = evaluator_v2.accepted_accuracy_by_basis(predictions, reference)
+    _print_basis_breakdown(by_basis)
 
     if args.output:
         output_path = Path(args.output)
@@ -194,6 +201,7 @@ def _run_evaluate(args: argparse.Namespace) -> None:
                 {
                     "majority_class_baseline": {"label": label, "accuracy": baseline_acc},
                     "metrics": _metrics_to_json_dict(result_for_output),
+                    "accepted_accuracy_by_basis": _basis_breakdown_to_json_dict(by_basis),
                 },
                 f,
                 indent=2,
@@ -241,7 +249,7 @@ def _run_benchmark(args: argparse.Namespace) -> None:
             _print_metrics("Pooled out-of-fold", by_fold["pooled"])
         else:
             _print_metrics("Overall", evaluator_v2.evaluate(predictions, reference))
-        _print_basis_breakdown(predictions, reference)
+        _print_basis_breakdown(evaluator_v2.accepted_accuracy_by_basis(predictions, reference))
     else:
         console.print(f"[yellow]Reference file not found at {reference_path}; skipping scoring.[/yellow]")
 
