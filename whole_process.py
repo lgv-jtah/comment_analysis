@@ -17,8 +17,10 @@ from rich.console import Console
 from rich.markup import escape
 
 from classifier import ReactionClassifier
+from context_builder import build_comment_context
 from key_message_extractor import KeyMessageExtraction
 from llm_handler import LLMHandler
+from policy import StancePolicyEngineV2
 from stance_detector import StanceDetector
 
 console = Console()
@@ -47,6 +49,32 @@ OUTPUT_COLUMNS = [
     "comment_text",
     "stance",
     "explanation",
+    "extraction_model_name",
+    "stance_model_name",
+]
+
+# Output shape for run_v2() (policy.PairOutput's contract, plus the join keys
+# and model provenance columns OUTPUT_COLUMNS also carries). Deliberately not
+# merged with OUTPUT_COLUMNS: the two pipelines produce structurally
+# different results (one stance-per-pair vs. a validated, review-routed
+# status per pair), and forcing one shape onto the other would hide that.
+OUTPUT_COLUMNS_V2 = [
+    "contribution_id",
+    "contributionContent",
+    "key_message_id",
+    "key_message",
+    "comment_text",
+    "pair_id",
+    "status",
+    "proposed_stance",
+    "final_stance",
+    "basis",
+    "comment_evidence",
+    "source_evidence",
+    "explanation",
+    "review_reasons",
+    "policy_version",
+    "run_id",
     "extraction_model_name",
     "stance_model_name",
 ]
@@ -470,3 +498,166 @@ class WholeProcess:
         )
 
         return pd.DataFrame(rows, columns=OUTPUT_COLUMNS)
+
+    async def run_v2(
+        self,
+        df: pd.DataFrame,
+        proceeding_description: str = "",
+        verifier_enabled: bool = False,
+    ) -> pd.DataFrame:
+        """Run the pipeline using the policy v2 engine (additive; run() is untouched).
+
+        Key-message extraction is identical to run() (same extractor, same
+        per-contribution loop). Stance resolution differs structurally: this
+        calls StancePolicyEngineV2.resolve_comment() once per comment (not
+        once per (key message, comment) pair) via context_builder, the same
+        construction path a v2 CLI benchmark command uses -- so there is
+        exactly one implementation of the v2 routing/policy logic, not
+        divergent copies. The legacy fast/ensemble-path BERT gate
+        (should_fast_path/should_ensemble_path, ReactionClassifier) is not
+        used here: per the brief, it's retired as a mandatory decision gate
+        for policy_version="v2".
+
+        The row-parsing logic below (contribution_id/contribution_text/
+        comments extraction) intentionally duplicates a few lines from
+        run() rather than factoring out a shared helper, so run()'s tested
+        body stays byte-for-byte unchanged -- this method carries the
+        entire risk of the v2 wiring, not the legacy path.
+
+        Args:
+            df: Contributions DataFrame with ``contributionContent`` and
+                ``comments`` columns (and optionally ``contribution_id``).
+            proceeding_description: Optional planning-proceeding context passed
+                to the key-message extractor.
+            verifier_enabled: Forwarded to StancePolicyEngineV2; see its
+                docstring.
+
+        Returns:
+            A DataFrame with :data:`OUTPUT_COLUMNS_V2`; empty if no rows are
+            produced.
+        """
+        engine = StancePolicyEngineV2(
+            llm_handler=self._llm_handler,
+            base_url=self.stance_base_url,
+            model_name=self.stance_model_name,
+            api_key=self._stance_api_key,
+            enable_thinking=self._stance_enable_thinking,
+            verifier_enabled=verifier_enabled,
+        )
+
+        semaphore = asyncio.Semaphore(1)
+        rows: list[dict] = []
+        total = len(df)
+        total_start = time.time()
+        run_id = f"whole_process_v2_{int(time.time())}"
+
+        async with httpx.AsyncClient() as client:
+            for contrib_idx, (_, row) in enumerate(df.iterrows(), start=1):
+                contrib_start = time.time()
+                contribution_id = (
+                    int(row["contribution_id"])
+                    if "contribution_id" in df.columns
+                    and np.ndim(row["contribution_id"]) == 0
+                    and not pd.isna(row["contribution_id"])
+                    else contrib_idx
+                )
+                contribution_text = (
+                    ""
+                    if np.ndim(row["contributionContent"]) == 0
+                    and pd.isna(row["contributionContent"])
+                    else str(row["contributionContent"])
+                )
+                raw_comments = row.get("comments", None)
+                comments = (
+                    []
+                    if raw_comments is None
+                    or (np.ndim(raw_comments) == 0 and pd.isna(raw_comments))
+                    else list(raw_comments)
+                )
+
+                console.print(
+                    f"[bold][{contrib_idx}/{total}] Contribution {contribution_id}[/bold]"
+                )
+                preview = (
+                    contribution_text[:200] + "…"
+                    if len(contribution_text) > 200
+                    else contribution_text
+                )
+                console.print(f"  [dim]↳ {escape(preview)}[/dim]")
+
+                km_start = time.time()
+                key_messages = await self._extractor.extract(
+                    client=client,
+                    contribution=contribution_text,
+                    proceeding_description=proceeding_description,
+                    semaphore=semaphore,
+                )
+                km_elapsed = time.time() - km_start
+                if not key_messages:
+                    console.print(
+                        f"  [yellow]↳ Key message extraction: no messages "
+                        f"({km_elapsed:.2f}s) — skipping[/yellow]"
+                    )
+                    continue
+                console.print(
+                    f"  [cyan]↳ Key message extraction: {len(key_messages)} messages "
+                    f"({km_elapsed:.2f}s)[/cyan]"
+                )
+
+                rows_added = 0
+                for comment_idx, comment_text in enumerate(comments, start=1):
+                    comment_str = str(comment_text)
+                    step_start = time.time()
+
+                    context = build_comment_context(
+                        run_id=run_id,
+                        contribution_id=str(contribution_id),
+                        comment_text=comment_str,
+                        key_messages=key_messages,
+                        contribution_text=contribution_text or None,
+                    )
+                    results = await engine.resolve_comment(client, semaphore, context)
+
+                    step_elapsed = time.time() - step_start
+                    console.print(
+                        f"      Comment {comment_idx}/{len(comments)}: "
+                        f"{len(results)} key messages ({step_elapsed:.2f}s)"
+                    )
+
+                    for pair_output, km_ref in zip(results, context.key_messages):
+                        rows.append(
+                            {
+                                "contribution_id": contribution_id,
+                                "contributionContent": contribution_text,
+                                "key_message_id": km_ref.key_message_id,
+                                "key_message": km_ref.text,
+                                "comment_text": comment_str,
+                                "pair_id": pair_output.pair_id,
+                                "status": pair_output.status,
+                                "proposed_stance": pair_output.proposed_stance,
+                                "final_stance": pair_output.final_stance,
+                                "basis": pair_output.basis,
+                                "comment_evidence": pair_output.comment_evidence,
+                                "source_evidence": pair_output.source_evidence,
+                                "explanation": pair_output.explanation,
+                                "review_reasons": pair_output.review_reasons,
+                                "policy_version": pair_output.policy_version,
+                                "run_id": pair_output.run_id,
+                                "extraction_model_name": self.extraction_model_name,
+                                "stance_model_name": self.stance_model_name,
+                            }
+                        )
+                        rows_added += 1
+
+                contrib_elapsed = time.time() - contrib_start
+                console.print(
+                    f"  [green]→ {rows_added} rows  |  contribution: "
+                    f"{contrib_elapsed:.2f}s[/green]"
+                )
+
+        total_elapsed = time.time() - total_start
+        console.print(
+            f"[bold green]Total: {len(rows)} rows in {total_elapsed:.2f}s[/bold green]"
+        )
+
+        return pd.DataFrame(rows, columns=OUTPUT_COLUMNS_V2)

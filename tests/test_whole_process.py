@@ -911,6 +911,7 @@ class FakeWholeProcess:
 
     last_instance = None
     run_result = None
+    run_v2_result = None
 
     def __init__(self, *args, **kwargs):
         self.init_kwargs = kwargs
@@ -932,6 +933,36 @@ class FakeWholeProcess:
                 }
             ],
             columns=OUTPUT_COLUMNS,
+        )
+
+    async def run_v2(self, df, proceeding_description="", verifier_enabled=False):
+        self.run_v2_df = df
+        if FakeWholeProcess.run_v2_result is not None:
+            return FakeWholeProcess.run_v2_result
+        return pd.DataFrame(
+            [
+                {
+                    "contribution_id": 1,
+                    "contributionContent": "Beitrag",
+                    "key_message_id": "1:km1",
+                    "key_message": "km1",
+                    "comment_text": "c1",
+                    "pair_id": "abc123",
+                    "status": "accepted",
+                    "proposed_stance": "in_favor",
+                    "final_stance": "in_favor",
+                    "basis": "general_approval",
+                    "comment_evidence": [],
+                    "source_evidence": [],
+                    "explanation": "reason",
+                    "review_reasons": [],
+                    "policy_version": "v2",
+                    "run_id": "run-1",
+                    "extraction_model_name": "test",
+                    "stance_model_name": "test",
+                }
+            ],
+            columns=whole_process.OUTPUT_COLUMNS_V2,
         )
 
 
@@ -1108,3 +1139,346 @@ def test_run_whole_process_zero_count_aborts(monkeypatch, tmp_data_dir):
     asyncio.run(main.run_whole_process())
 
     assert list(tmp_data_dir.glob("whole_process_*.parquet")) == []
+
+
+# --- run_v2() (policy v2 wiring) ------------------------------------------
+#
+# run() above is never touched by these tests; run_v2() is a separate method
+# added alongside it, so these tests only exercise the new code path.
+
+
+def _scope_response(**overrides):
+    base = {
+        "scope_type": "whole_contribution_approval",
+        "affected_key_message_ids": [],
+        "general_support_extends_to_unaddressed": None,
+        "comment_evidence": [],
+        "uncertainty_flags": [],
+        "explanation": "Allgemeine Zustimmung.",
+    }
+    base.update(overrides)
+    return base
+
+
+def _make_v2_call_model(scope_response_fn=None, stance_targets_fn=None):
+    """Build a fake call_model that dispatches on response_schema, like the
+    real StancePolicyEngineV2 stages do."""
+
+    async def call_model(*, response_schema, **kwargs):
+        if response_schema.__name__ == "ScopeAttributionResult":
+            if scope_response_fn is not None:
+                return scope_response_fn(kwargs)
+            return _scope_response()
+        if stance_targets_fn is not None:
+            return {"targets": stance_targets_fn(kwargs)}
+        return {"targets": []}
+
+    return call_model
+
+
+def test_run_v2_passes_contribution_text_into_the_context(monkeypatch):
+    """Regression test: run()'s _resolve_stance never threads contribution_text
+    through (confirmed bug), so full-context prompts silently got "". run_v2()
+    must actually pass it."""
+    km_list = [{"key_message": "km1", "key_message_type": "Wunsch", "related_sentences": []}]
+    processor = _make_processor(monkeypatch, km_list)
+
+    seen_contribution_texts = []
+
+    async def call_model(*, response_schema, messages, **kwargs):
+        seen_contribution_texts.append(messages[0]["content"])
+        return _scope_response()
+
+    monkeypatch.setattr(processor._llm_handler, "call_model", call_model)
+
+    df = pd.DataFrame(
+        {
+            "contribution_id": [101],
+            "contributionContent": ["Ein ausführlicher Beitragstext."],
+            "comments": [["Super Idee!"]],
+        }
+    )
+
+    asyncio.run(processor.run_v2(df))
+
+    assert any("Ein ausführlicher Beitragstext." in text for text in seen_contribution_texts)
+
+
+def test_run_v2_related_sentences_reach_the_context(monkeypatch):
+    km_list = [
+        {
+            "key_message": "km1",
+            "key_message_type": "Wunsch",
+            "related_sentences": ["Ein Originalsatz aus dem Beitrag."],
+        }
+    ]
+    processor = _make_processor(monkeypatch, km_list)
+
+    seen_stance_prompts = []
+
+    async def call_model(*, response_schema, messages, **kwargs):
+        if response_schema.__name__ == "ScopeAttributionResult":
+            return _scope_response(scope_type="target_specific", affected_key_message_ids=["101:km1"])
+        seen_stance_prompts.append(messages[0]["content"])
+        return {
+            "targets": [
+                {
+                    "key_message_id": "101:km1",
+                    "stance": "in_favor",
+                    "neutral_basis": None,
+                    "comment_evidence": [],
+                    "source_evidence": [],
+                    "explanation": "",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(processor._llm_handler, "call_model", call_model)
+
+    df = pd.DataFrame(
+        {
+            "contribution_id": [101],
+            "contributionContent": ["Beitragstext."],
+            "comments": [["Ein Kommentar dazu."]],
+        }
+    )
+
+    asyncio.run(processor.run_v2(df))
+
+    assert any("Ein Originalsatz aus dem Beitrag." in p for p in seen_stance_prompts)
+
+
+def test_run_v2_flattens_one_row_per_key_message(monkeypatch):
+    km_list = [
+        {"key_message": "km1", "key_message_type": "Wunsch", "related_sentences": []},
+        {"key_message": "km2", "key_message_type": "Wunsch", "related_sentences": []},
+    ]
+    processor = _make_processor(monkeypatch, km_list)
+    monkeypatch.setattr(
+        processor._llm_handler,
+        "call_model",
+        _make_v2_call_model(lambda kwargs: _scope_response(scope_type="whole_contribution_approval")),
+    )
+
+    df = pd.DataFrame(
+        {
+            "contribution_id": [101],
+            "contributionContent": ["Beitragstext."],
+            "comments": [["Super Idee!"]],
+        }
+    )
+
+    result = asyncio.run(processor.run_v2(df))
+
+    assert len(result) == 2  # one comment x two key messages
+    assert set(result["key_message"]) == {"km1", "km2"}
+    assert (result["final_stance"] == "in_favor").all()
+    assert (result["basis"] == "general_approval").all()
+    assert (result["policy_version"] == "v2").all()
+    assert list(result.columns) == list(whole_process.OUTPUT_COLUMNS_V2)
+
+
+def test_run_v2_skips_contribution_with_no_key_messages(monkeypatch):
+    processor = _make_processor(monkeypatch, km_list=[])
+    monkeypatch.setattr(processor._llm_handler, "call_model", _make_v2_call_model())
+
+    df = pd.DataFrame(
+        {
+            "contribution_id": [101],
+            "contributionContent": ["Beitragstext."],
+            "comments": [["Super Idee!"]],
+        }
+    )
+
+    result = asyncio.run(processor.run_v2(df))
+
+    assert result.empty
+
+
+def test_run_v2_failed_llm_call_produces_failed_status_not_silent_neutral(monkeypatch):
+    km_list = [{"key_message": "km1", "key_message_type": "Wunsch", "related_sentences": []}]
+    processor = _make_processor(monkeypatch, km_list)
+
+    async def call_model(*, response_schema, **kwargs):
+        return None
+
+    monkeypatch.setattr(processor._llm_handler, "call_model", call_model)
+
+    df = pd.DataFrame(
+        {
+            "contribution_id": [101],
+            "contributionContent": ["Beitragstext."],
+            "comments": [["Ein Kommentar."]],
+        }
+    )
+
+    result = asyncio.run(processor.run_v2(df))
+
+    assert len(result) == 1
+    assert result.iloc[0]["status"] == "failed"
+    assert result.iloc[0]["final_stance"] is None
+
+
+def test_run_v2_does_not_call_the_reaction_classifier(monkeypatch):
+    """Policy v2 retires the BERT fast-path gate as a mandatory decision --
+    run_v2() must not even load it."""
+    km_list = [{"key_message": "km1", "key_message_type": "Wunsch", "related_sentences": []}]
+    classifier = FakeClassifier()
+    processor = _make_processor(monkeypatch, km_list, classifier=classifier)
+    monkeypatch.setattr(processor._llm_handler, "call_model", _make_v2_call_model())
+
+    df = pd.DataFrame(
+        {
+            "contribution_id": [101],
+            "contributionContent": ["Beitragstext."],
+            "comments": [["Super Idee!"]],
+        }
+    )
+
+    asyncio.run(processor.run_v2(df))
+
+    assert classifier.load_called_with is None
+
+
+def test_run_menu_returns_13(monkeypatch):
+    """run_menu returns "13" when the user selects option 13."""
+    monkeypatch.setattr("builtins.input", lambda *a: "13")
+    assert main.run_menu() == "13"
+
+
+def test_main_dispatches_to_whole_process_v2(monkeypatch):
+    """main routes choice "13" to run_whole_process_v2 via asyncio.run."""
+    monkeypatch.setattr(main, "run_menu", lambda: "13")
+    called = {"run": False}
+
+    async def fake_run():
+        called["run"] = True
+
+    monkeypatch.setattr(main, "run_whole_process_v2", fake_run)
+    main.main()
+    assert called["run"] is True
+
+
+def test_run_whole_process_v2_happy_path(monkeypatch, tmp_data_dir):
+    """run_whole_process_v2 writes the OUTPUT_COLUMNS_V2-shaped output parquet."""
+    FakeWholeProcess.run_v2_result = None
+    source = tmp_data_dir / "input.parquet"
+    pd.DataFrame(
+        {
+            "contribution_id": [1],
+            "contributionContent": ["Beitrag"],
+            "comments": [["c1"]],
+        }
+    ).to_parquet(source)
+
+    monkeypatch.setattr(main, "WholeProcess", FakeWholeProcess)
+    monkeypatch.setattr("builtins.input", lambda *a: "1")
+
+    asyncio.run(main.run_whole_process_v2())
+
+    extraction_slug = main._sanitize_model_name(main.EXTRACTION_LLM_MODEL_NAME)
+    stance_slug = main._sanitize_model_name(main.STANCE_LLM_MODEL_NAME)
+    output = tmp_data_dir / f"whole_process_v2_input_{extraction_slug}_{stance_slug}.parquet"
+    assert output.exists()
+    written = pd.read_parquet(output)
+    assert list(written.columns) == whole_process.OUTPUT_COLUMNS_V2
+    assert written.iloc[0]["final_stance"] == "in_favor"
+    assert written.iloc[0]["policy_version"] == "v2"
+
+
+def test_run_whole_process_v2_missing_comments(monkeypatch, tmp_data_dir):
+    source = tmp_data_dir / "input.parquet"
+    pd.DataFrame({"contribution_id": [1], "contributionContent": ["Beitrag"]}).to_parquet(source)
+
+    monkeypatch.setattr(main, "WholeProcess", FakeWholeProcess)
+    monkeypatch.setattr("builtins.input", lambda *a: "1")
+
+    asyncio.run(main.run_whole_process_v2())
+
+    assert list(tmp_data_dir.glob("whole_process_v2_*.parquet")) == []
+
+
+def test_run_whole_process_v2_skips_on_overwrite_decline(monkeypatch, tmp_data_dir):
+    source = tmp_data_dir / "input.parquet"
+    pd.DataFrame(
+        {"contribution_id": [1], "contributionContent": ["Beitrag"], "comments": [["c1"]]}
+    ).to_parquet(source)
+
+    extraction_slug = main._sanitize_model_name(main.EXTRACTION_LLM_MODEL_NAME)
+    stance_slug = main._sanitize_model_name(main.STANCE_LLM_MODEL_NAME)
+    output = tmp_data_dir / f"whole_process_v2_input_{extraction_slug}_{stance_slug}.parquet"
+    output.write_bytes(b"existing")
+
+    monkeypatch.setattr(
+        main, "WholeProcess", lambda *a, **k: pytest.fail("should not construct")
+    )
+    inputs = iter(["1", "", "n"])  # file=1, count=blank(all), overwrite=no
+    monkeypatch.setattr("builtins.input", lambda *_: next(inputs))
+
+    asyncio.run(main.run_whole_process_v2())
+
+    assert output.read_bytes() == b"existing"
+
+
+def test_run_whole_process_v2_missing_content(monkeypatch, tmp_data_dir):
+    source = tmp_data_dir / "input.parquet"
+    pd.DataFrame({"comments": [["c1"]]}).to_parquet(source)
+
+    monkeypatch.setattr(main, "WholeProcess", FakeWholeProcess)
+    monkeypatch.setattr("builtins.input", lambda *a: "1")
+
+    asyncio.run(main.run_whole_process_v2())
+
+    assert list(tmp_data_dir.glob("whole_process_v2_*.parquet")) == []
+
+
+def test_run_whole_process_v2_invalid_count_aborts(monkeypatch, tmp_data_dir):
+    _make_multi_row_source(tmp_data_dir, 5)
+
+    monkeypatch.setattr(
+        main, "WholeProcess", lambda *a, **k: pytest.fail("should not construct")
+    )
+    inputs = iter(["1", "not-a-number"])
+    monkeypatch.setattr("builtins.input", lambda *_: next(inputs))
+
+    asyncio.run(main.run_whole_process_v2())
+
+    assert list(tmp_data_dir.glob("whole_process_v2_*.parquet")) == []
+
+
+def test_run_whole_process_v2_zero_count_aborts(monkeypatch, tmp_data_dir):
+    _make_multi_row_source(tmp_data_dir, 5)
+
+    monkeypatch.setattr(
+        main, "WholeProcess", lambda *a, **k: pytest.fail("should not construct")
+    )
+    inputs = iter(["1", "0"])
+    monkeypatch.setattr("builtins.input", lambda *_: next(inputs))
+
+    asyncio.run(main.run_whole_process_v2())
+
+    assert list(tmp_data_dir.glob("whole_process_v2_*.parquet")) == []
+
+
+def test_run_whole_process_v2_processes_subset(monkeypatch, tmp_data_dir):
+    FakeWholeProcess.run_v2_result = None
+    _make_multi_row_source(tmp_data_dir, 5)
+
+    monkeypatch.setattr(main, "WholeProcess", FakeWholeProcess)
+    inputs = iter(["1", "2"])  # file=1, count=2 of 5
+    monkeypatch.setattr("builtins.input", lambda *_: next(inputs))
+
+    asyncio.run(main.run_whole_process_v2())
+
+    assert len(FakeWholeProcess.last_instance.run_v2_df) == 2
+
+
+def test_run_whole_process_v2_no_source_file_returns_early(monkeypatch, tmp_data_dir):
+    # tmp_data_dir has no parquet files, so _pick_parquet_file returns None.
+    monkeypatch.setattr(
+        main, "WholeProcess", lambda *a, **k: pytest.fail("should not construct")
+    )
+
+    asyncio.run(main.run_whole_process_v2())
+
+    assert list(tmp_data_dir.glob("whole_process_v2_*.parquet")) == []

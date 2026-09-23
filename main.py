@@ -1072,6 +1072,77 @@ async def run_whole_process() -> None:
     console.print(f"[green]Whole process saved to {output_path} — {len(result_df)} rows written[/green]")
 
 
+async def run_whole_process_v2() -> None:
+    """Run the end-to-end whole-process pipeline using the policy v2 engine.
+
+    Mirrors run_whole_process() (same file picker, same row-count prompt,
+    same overwrite confirmation) but delegates to
+    :meth:`WholeProcess.run_v2`, which resolves stance via
+    :class:`policy.StancePolicyEngineV2` -- one call per comment across all
+    of its key messages at once, with the general-approval rule applied
+    deterministically -- instead of the legacy per-(key message, comment)
+    fast/ensemble/LLM routing. See docs/stance_policy_v2.md. Output columns
+    (whole_process.OUTPUT_COLUMNS_V2) differ from run_whole_process()'s
+    legacy shape: a validated status/basis per pair rather than a bare
+    stance, so failures and review routing stay visible rather than being
+    silently folded into a stance value.
+    """
+    source_path = _pick_parquet_file(DATA_DIR)
+    if source_path is None:
+        return
+
+    df = pd.read_parquet(source_path)
+    if "contributionContent" not in df.columns:
+        console.print("[red]Selected file is missing the 'contributionContent' column.[/red]")
+        return
+    if "comments" not in df.columns:
+        console.print("[red]Selected file is missing the 'comments' column.[/red]")
+        return
+
+    n_raw = input("Process how many contributions? (blank for all): ").strip()
+    if n_raw != "":
+        try:
+            n_contributions = int(n_raw)
+        except ValueError:
+            console.print("[red]Please enter a whole number or leave blank for all.[/red]")
+            return
+        if n_contributions <= 0:
+            console.print("[red]Please enter a number greater than zero.[/red]")
+            return
+        total_available = len(df)
+        if n_contributions < total_available:
+            df = df.sample(n=n_contributions)
+            console.print(
+                f"[cyan]Processing {n_contributions} of {total_available} "
+                f"contributions (random sample).[/cyan]"
+            )
+        else:
+            console.print(
+                f"[yellow]Requested {n_contributions} but only {total_available} "
+                f"available — using all.[/yellow]"
+            )
+
+    extraction_slug = _sanitize_model_name(EXTRACTION_LLM_MODEL_NAME)
+    stance_slug = _sanitize_model_name(STANCE_LLM_MODEL_NAME)
+    output_path = DATA_DIR / f"whole_process_v2_{source_path.stem}_{extraction_slug}_{stance_slug}.parquet"
+    if output_path.exists() and not _prompt_overwrite(output_path):
+        console.print("[yellow]Skipping whole process (v2) — existing file kept.[/yellow]")
+        return
+
+    processor = WholeProcess(
+        extraction_base_url=EXTRACTION_LLM_BASE_URL,
+        extraction_model_name=EXTRACTION_LLM_MODEL_NAME,
+        stance_base_url=STANCE_LLM_BASE_URL,
+        stance_model_name=STANCE_LLM_MODEL_NAME,
+        extraction_api_key=EXTRACTION_LLM_API_KEY,
+        stance_api_key=STANCE_LLM_API_KEY,
+        stance_enable_thinking=STANCE_LLM_ENABLE_THINKING,
+    )
+    result_df = await processor.run_v2(df, proceeding_description="")
+    result_df.to_parquet(output_path)
+    console.print(f"[green]Whole process (v2) saved to {output_path} — {len(result_df)} rows written[/green]")
+
+
 def inspect_key_messages() -> None:
     """Interactively page through a parquet file's extracted key messages.
 
@@ -1403,7 +1474,7 @@ def create_contributions_with_comments_dataset() -> None:
         console.print(f"[red]Failed: {e}[/red]")
 
 
-MENU_OPTIONS = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "q"}
+MENU_OPTIONS = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "q"}
 
 
 def run_menu() -> str:
@@ -1412,17 +1483,17 @@ def run_menu() -> str:
     Loops until the user enters a valid option, re-prompting on bad input.
 
     Returns:
-        The selected option, one of "1"-"12" or "q".
+        The selected option, one of "1"-"13" or "q".
     """
     while True:
         console.print(Panel(
-            "[bold]1[/bold] — Fetch contributions\n[bold]2[/bold] — Run stance detection\n[bold]3[/bold] — Sample contributions\n[bold]4[/bold] — Extract key messages\n[bold]5[/bold] — Inspect key messages\n[bold]6[/bold] — Fetch contribution with comments\n[bold]7[/bold] — Build contributions-with-comments dataset\n[bold]8[/bold] — Inspect parquet file\n[bold]9[/bold] — Run whole process\n[bold]10[/bold] — Export parquet file to Excel\n[bold]11[/bold] — Judge key messages\n[bold]12[/bold] — Compare judge results\n[bold]q[/bold] — Quit",
+            "[bold]1[/bold] — Fetch contributions\n[bold]2[/bold] — Run stance detection\n[bold]3[/bold] — Sample contributions\n[bold]4[/bold] — Extract key messages\n[bold]5[/bold] — Inspect key messages\n[bold]6[/bold] — Fetch contribution with comments\n[bold]7[/bold] — Build contributions-with-comments dataset\n[bold]8[/bold] — Inspect parquet file\n[bold]9[/bold] — Run whole process\n[bold]10[/bold] — Export parquet file to Excel\n[bold]11[/bold] — Judge key messages\n[bold]12[/bold] — Compare judge results\n[bold]13[/bold] — Run whole process (policy v2)\n[bold]q[/bold] — Quit",
             title="[bold cyan]DIPAS Analysis[/bold cyan]",
         ))
         choice = input("Select option: ").strip().lower()
         if choice in MENU_OPTIONS:
             return choice
-        console.print("[red]Invalid choice — enter 1-12 or q.[/red]")
+        console.print("[red]Invalid choice — enter 1-13 or q.[/red]")
 
 
 def main() -> None:
@@ -1466,6 +1537,10 @@ def main() -> None:
         # run_compare_judge_results is synchronous (no LLM/network calls), so it
         # is called directly rather than driven by asyncio.run().
         run_compare_judge_results()
+    elif choice == "13":
+        # run_whole_process_v2 is a coroutine driven by asyncio.run() from this
+        # synchronous entry point.
+        asyncio.run(run_whole_process_v2())
     else:
         console.print("[yellow]Goodbye.[/yellow]")
 

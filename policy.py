@@ -106,11 +106,22 @@ def _normalize_stance_fields(raw: dict) -> dict:
 
 
 def _format_key_messages_block(key_messages: list[KeyMessageRef]) -> str:
+    """Render key messages (with their exact source sentences) for a prompt.
+
+    related_sentences must be included here, not just the key-message text:
+    the per-target stance stage is asked to ground "source_evidence" in
+    these sentences, and the orchestrator validates that evidence is an
+    exact substring of them -- the model has no way to produce a valid quote
+    for text it was never shown.
+    """
     if not key_messages:
         return "(keine Kernaussagen)"
     lines = []
     for km in key_messages:
         lines.append(f"- id: {km.key_message_id}\n  text: {km.text}")
+        if km.related_sentences:
+            for sentence in km.related_sentences:
+                lines.append(f"  related_sentence: {sentence}")
     return "\n".join(lines)
 
 

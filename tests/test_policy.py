@@ -10,9 +10,9 @@ construction also validates the prompt-loading path end to end.
 """
 import asyncio
 
-from context_builder import build_comment_context
+from context_builder import KeyMessageRef, build_comment_context
 from llm_handler import LLMHandler
-from policy import StancePolicyEngineV2
+from policy import StancePolicyEngineV2, _format_key_messages_block
 
 
 def _make_engine(monkeypatch, call_model=None, verifier_enabled=False) -> StancePolicyEngineV2:
@@ -61,6 +61,37 @@ def _stance_response(targets):
 
 def _run(engine, context):
     return asyncio.run(engine.resolve_comment(client=None, semaphore=None, context=context))
+
+
+# ---------------------------------------------------------------------------
+# Prompt formatting includes related_sentences, not just key-message text --
+# the model can't produce a valid source_evidence quote for text it was
+# never shown.
+# ---------------------------------------------------------------------------
+
+
+def test_format_key_messages_block_includes_related_sentences():
+    kms = [
+        KeyMessageRef(
+            key_message_id="1:km1",
+            text="Mehr Fahrradständer",
+            related_sentences=["Es fehlen Abstellmöglichkeiten.", "Ein zweiter Originalsatz."],
+        )
+    ]
+
+    block = _format_key_messages_block(kms)
+
+    assert "Es fehlen Abstellmöglichkeiten." in block
+    assert "Ein zweiter Originalsatz." in block
+
+
+def test_format_key_messages_block_handles_no_related_sentences():
+    kms = [KeyMessageRef(key_message_id="1:km1", text="Mehr Fahrradständer", related_sentences=[])]
+
+    block = _format_key_messages_block(kms)
+
+    assert "1:km1" in block
+    assert "Mehr Fahrradständer" in block
 
 
 # ---------------------------------------------------------------------------
