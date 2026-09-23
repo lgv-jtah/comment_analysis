@@ -22,6 +22,7 @@ import evaluator_v2
 from benchmark import run_benchmark
 from dataset_builder import build_dataset, write_dataset
 from fold_builder import load_folds
+from historical_baseline import build_historical_predictions
 
 load_dotenv()
 
@@ -195,6 +196,7 @@ def _run_benchmark(args: argparse.Namespace) -> None:
             api_key=api_key,
             enable_thinking=args.enable_thinking,
             verifier_enabled=args.verifier,
+            mode=args.mode,
             verify_ionos=not args.no_verify_ionos,
             limit=args.limit,
         )
@@ -217,6 +219,27 @@ def _run_benchmark(args: argparse.Namespace) -> None:
             _print_metrics("Overall", evaluator_v2.evaluate(predictions, reference))
     else:
         console.print(f"[yellow]Reference file not found at {reference_path}; skipping scoring.[/yellow]")
+
+
+def _run_historical_baseline(args: argparse.Namespace) -> None:
+    """Score the historical saved baseline (brief section 10, step 1)."""
+    reference = pd.read_parquet(args.reference)
+    predictions = build_historical_predictions(reference)
+
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    predictions.to_parquet(output_path)
+    console.print(f"[green]Wrote {len(predictions)} historical-baseline predictions to {output_path}[/green]")
+
+    folds_path = Path(args.folds) if args.folds else None
+    if folds_path and folds_path.exists():
+        fold_assignment = load_folds(folds_path)
+        by_fold = evaluator_v2.evaluate_by_fold(predictions, reference, fold_assignment)
+        for entry in by_fold["per_fold"]:
+            _print_metrics(f"Fold {entry['fold']}", entry["metrics"])
+        _print_metrics("Pooled out-of-fold", by_fold["pooled"])
+    else:
+        _print_metrics("Overall", evaluator_v2.evaluate(predictions, reference))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -289,7 +312,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip the IONOS-routing pre-flight check (for non-IONOS testing only).",
     )
     benchmark_parser.add_argument("--limit", type=int, default=None, help="Cap the number of comments processed.")
+    benchmark_parser.add_argument(
+        "--mode",
+        choices=["two_stage", "one_call"],
+        default="two_stage",
+        help="Policy engine variant: 'two_stage' (StancePolicyEngineV2, default) or "
+        "'one_call' (OneCallPolicyEngineV2) -- brief section 10's experiment matrix.",
+    )
     benchmark_parser.set_defaults(func=_run_benchmark)
+
+    historical_parser = subparsers.add_parser(
+        "historical-baseline",
+        help="Score the historical saved baseline (brief section 10, step 1): established "
+        "original labels reshaped into predictions and scored through the same evaluator_v2 path.",
+    )
+    historical_parser.add_argument("--output", required=True, help="Path to write the predictions parquet.")
+    historical_parser.add_argument(
+        "--reference",
+        default=str(DEFAULT_REFERENCE_PATH),
+        help=f"Path to the reference dataset (default: {DEFAULT_REFERENCE_PATH}).",
+    )
+    historical_parser.add_argument(
+        "--folds",
+        default=str(DEFAULT_FOLDS_PATH),
+        help=f"Path to a persisted fold assignment (default: {DEFAULT_FOLDS_PATH}).",
+    )
+    historical_parser.set_defaults(func=_run_historical_baseline)
 
     return parser
 

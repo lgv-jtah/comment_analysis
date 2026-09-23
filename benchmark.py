@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import Literal
 
 import httpx
 import pandas as pd
@@ -30,8 +31,10 @@ import pandas as pd
 from context_builder import build_comment_context
 from ionos_config import verify_ionos_only
 from llm_handler import LLMHandler
-from policy import StancePolicyEngineV2
+from policy import OneCallPolicyEngineV2, StancePolicyEngineV2
 from whole_process import OUTPUT_COLUMNS_V2
+
+Mode = Literal["two_stage", "one_call"]
 
 
 def load_frozen_comments(source: pd.DataFrame) -> list[dict]:
@@ -95,8 +98,9 @@ async def run_benchmark(
     verify_ionos: bool = True,
     run_id: str | None = None,
     limit: int | None = None,
+    mode: Mode = "two_stage",
 ) -> pd.DataFrame:
-    """Run StancePolicyEngineV2 over a frozen, already-extracted source.
+    """Run the policy v2 engine over a frozen, already-extracted source.
 
     Args:
         source: whole_process-shaped rows; see load_frozen_comments.
@@ -104,12 +108,16 @@ async def run_benchmark(
         model_name: Model identifier.
         api_key: Bearer token for the endpoint.
         enable_thinking: Forwarded to LLMHandler.call_model.
-        verifier_enabled: Forwarded to StancePolicyEngineV2.
+        verifier_enabled: Forwarded to StancePolicyEngineV2; ignored when
+            mode == "one_call" (OneCallPolicyEngineV2 has no verifier stage).
         verify_ionos: When True (default), fail fast via
             ionos_config.verify_ionos_only() before doing any work.
         run_id: Identifier recorded on every output row; auto-generated
             from the current time when None.
         limit: Optional cap on the number of comments processed.
+        mode: "two_stage" (StancePolicyEngineV2, the default) or "one_call"
+            (OneCallPolicyEngineV2) -- brief section 10's experiment matrix
+            compares both against the same frozen source/reference.
 
     Returns:
         A DataFrame with whole_process.OUTPUT_COLUMNS_V2 columns, one row
@@ -118,19 +126,31 @@ async def run_benchmark(
     Raises:
         ionos_config.IonosVerificationError: If verify_ionos is True and
             model_name isn't IONOS-routed.
+        ValueError: If mode is neither "two_stage" nor "one_call".
     """
     if verify_ionos:
         verify_ionos_only(model_name, base_url, api_key)
 
     run_id = run_id or f"benchmark_{int(time.time())}"
-    engine = StancePolicyEngineV2(
-        llm_handler=LLMHandler(),
-        base_url=base_url,
-        model_name=model_name,
-        api_key=api_key,
-        enable_thinking=enable_thinking,
-        verifier_enabled=verifier_enabled,
-    )
+    if mode == "two_stage":
+        engine = StancePolicyEngineV2(
+            llm_handler=LLMHandler(),
+            base_url=base_url,
+            model_name=model_name,
+            api_key=api_key,
+            enable_thinking=enable_thinking,
+            verifier_enabled=verifier_enabled,
+        )
+    elif mode == "one_call":
+        engine = OneCallPolicyEngineV2(
+            llm_handler=LLMHandler(),
+            base_url=base_url,
+            model_name=model_name,
+            api_key=api_key,
+            enable_thinking=enable_thinking,
+        )
+    else:
+        raise ValueError(f"Unknown mode {mode!r}; expected 'two_stage' or 'one_call'.")
 
     comments = load_frozen_comments(source)
     if limit is not None:

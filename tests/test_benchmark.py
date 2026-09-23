@@ -189,6 +189,54 @@ def test_run_benchmark_verifies_ionos_by_default(monkeypatch):
         )
 
 
+def test_run_benchmark_one_call_mode(monkeypatch):
+    async def fake_one_call(self, *, response_schema, **kwargs):
+        return {
+            "targets": [
+                {
+                    "key_message_id": "1:km1",
+                    "stance": "in_favor",
+                    "basis": "general_approval",
+                    "comment_evidence": [],
+                    "explanation": "",
+                }
+            ]
+        }
+
+    monkeypatch.setattr("policy.LLMHandler.call_model", fake_one_call)
+
+    source = pd.DataFrame([_source_row(contribution_id=1, key_message="km1")])
+
+    result = asyncio.run(
+        benchmark.run_benchmark(
+            source=source,
+            base_url="http://testserver",
+            model_name="test-model",
+            verify_ionos=False,
+            mode="one_call",
+        )
+    )
+
+    assert len(result) == 1
+    assert result.iloc[0]["final_stance"] == "in_favor"
+    assert result.iloc[0]["basis"] == "general_approval"
+
+
+def test_run_benchmark_invalid_mode_raises():
+    source = pd.DataFrame([_source_row()])
+
+    with pytest.raises(ValueError, match="Unknown mode"):
+        asyncio.run(
+            benchmark.run_benchmark(
+                source=source,
+                base_url="http://testserver",
+                model_name="test-model",
+                verify_ionos=False,
+                mode="not_a_real_mode",
+            )
+        )
+
+
 def test_run_benchmark_run_id_is_recorded_on_every_row(monkeypatch):
     monkeypatch.setattr("policy.LLMHandler.call_model", _fake_call_model)
 

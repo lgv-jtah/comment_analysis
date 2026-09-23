@@ -12,7 +12,7 @@ import asyncio
 
 from context_builder import KeyMessageRef, build_comment_context
 from llm_handler import LLMHandler
-from policy import StancePolicyEngineV2, _format_key_messages_block
+from policy import OneCallPolicyEngineV2, StancePolicyEngineV2, _format_key_messages_block
 
 
 def _make_engine(monkeypatch, call_model=None, verifier_enabled=False) -> StancePolicyEngineV2:
@@ -552,3 +552,157 @@ def test_verifier_agreement_keeps_accepted_result(monkeypatch):
 
     assert all(r.status == "accepted" for r in results)
     assert all(r.final_stance == "in_favor" for r in results)
+
+
+# ---------------------------------------------------------------------------
+# OneCallPolicyEngineV2
+# ---------------------------------------------------------------------------
+
+
+def _make_one_call_engine(monkeypatch, call_model=None) -> OneCallPolicyEngineV2:
+    engine = OneCallPolicyEngineV2(
+        llm_handler=LLMHandler(),
+        base_url="http://localhost:4000",
+        model_name="test-model",
+    )
+    if call_model is not None:
+        monkeypatch.setattr(engine._llm, "call_model", call_model)
+    return engine
+
+
+def _one_call_response(targets):
+    return {"targets": targets}
+
+
+def test_one_call_general_approval_reaches_every_key_message(monkeypatch):
+    context = _context(comment_text="Super Idee!")
+    km1_id, km2_id = [km.key_message_id for km in context.key_messages]
+
+    async def call_model(*, response_schema, **kwargs):
+        return _one_call_response(
+            [
+                {
+                    "key_message_id": km1_id,
+                    "stance": "in_favor",
+                    "basis": "general_approval",
+                    "comment_evidence": ["Super Idee!"],
+                    "explanation": "",
+                },
+                {
+                    "key_message_id": km2_id,
+                    "stance": "in_favor",
+                    "basis": "general_approval",
+                    "comment_evidence": ["Super Idee!"],
+                    "explanation": "",
+                },
+            ]
+        )
+
+    engine = _make_one_call_engine(monkeypatch, call_model)
+    results = _run(engine, context)
+
+    assert all(r.status == "accepted" for r in results)
+    assert all(r.final_stance == "in_favor" for r in results)
+    assert all(r.basis == "general_approval" for r in results)
+
+
+def test_one_call_mixed_targets(monkeypatch):
+    context = _context()
+    km1_id, km2_id = [km.key_message_id for km in context.key_messages]
+
+    async def call_model(*, response_schema, **kwargs):
+        return _one_call_response(
+            [
+                {"key_message_id": km1_id, "stance": "in_favor", "basis": "explicit_target", "comment_evidence": [], "explanation": ""},
+                {"key_message_id": km2_id, "stance": "neutral", "basis": "unaddressed", "comment_evidence": [], "explanation": ""},
+            ]
+        )
+
+    engine = _make_one_call_engine(monkeypatch, call_model)
+    results = _run(engine, context)
+    by_id = {r.key_message_id: r for r in results}
+
+    assert by_id[km1_id].final_stance == "in_favor"
+    assert by_id[km2_id].final_stance == "neutral"
+    assert by_id[km2_id].basis == "unaddressed"
+
+
+def test_one_call_missing_target_routes_all_to_review(monkeypatch):
+    context = _context()
+    km1_id = context.key_messages[0].key_message_id
+
+    async def call_model(*, response_schema, **kwargs):
+        # Only returns a target for km1, silently drops km2.
+        return _one_call_response(
+            [{"key_message_id": km1_id, "stance": "in_favor", "basis": "explicit_target", "comment_evidence": [], "explanation": ""}]
+        )
+
+    engine = _make_one_call_engine(monkeypatch, call_model)
+    results = _run(engine, context)
+
+    assert all(r.status == "needs_review" for r in results)
+    assert any("missing_targets" in reason for r in results for reason in r.review_reasons)
+
+
+def test_one_call_unknown_key_message_id_routes_to_review(monkeypatch):
+    context = _context()
+
+    async def call_model(*, response_schema, **kwargs):
+        return _one_call_response(
+            [{"key_message_id": "not-a-real-id", "stance": "in_favor", "basis": "explicit_target", "comment_evidence": [], "explanation": ""}]
+        )
+
+    engine = _make_one_call_engine(monkeypatch, call_model)
+    results = _run(engine, context)
+
+    assert all(r.status == "needs_review" for r in results)
+    assert any("unknown_key_message_id" in reason for r in results for reason in r.review_reasons)
+
+
+def test_one_call_evidence_not_substring_routes_to_review(monkeypatch):
+    context = _context()
+    km1_id, km2_id = [km.key_message_id for km in context.key_messages]
+
+    async def call_model(*, response_schema, **kwargs):
+        return _one_call_response(
+            [
+                {"key_message_id": km1_id, "stance": "in_favor", "basis": "explicit_target", "comment_evidence": ["nicht im kommentar"], "explanation": ""},
+                {"key_message_id": km2_id, "stance": "neutral", "basis": "unaddressed", "comment_evidence": [], "explanation": ""},
+            ]
+        )
+
+    engine = _make_one_call_engine(monkeypatch, call_model)
+    results = _run(engine, context)
+
+    assert all(r.status == "needs_review" for r in results)
+    assert any("evidence_not_substring_of_comment" in r.review_reasons for r in results)
+
+
+def test_one_call_failed_call_marks_everything_failed(monkeypatch):
+    async def call_model(*, response_schema, **kwargs):
+        return None
+
+    engine = _make_one_call_engine(monkeypatch, call_model)
+    results = _run(engine, _context())
+
+    assert all(r.status == "failed" for r in results)
+
+
+def test_one_call_malformed_output_routes_to_review(monkeypatch):
+    async def call_model(*, response_schema, **kwargs):
+        return {"not_targets_at_all": True}
+
+    engine = _make_one_call_engine(monkeypatch, call_model)
+    results = _run(engine, _context())
+
+    assert all(r.status == "needs_review" for r in results)
+    assert all(any("missing_targets" in reason for reason in r.review_reasons) for r in results)
+
+
+def test_one_call_no_key_messages_returns_empty(monkeypatch):
+    engine = _make_one_call_engine(monkeypatch, call_model=None)
+    context = build_comment_context(run_id="run-1", contribution_id="1", comment_text="text", key_messages=[])
+
+    results = _run(engine, context)
+
+    assert results == []

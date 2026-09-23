@@ -31,6 +31,7 @@ from policy_schemas import (
     ScopeAttributionResult,
     ScopeType,
     StanceLabelV2,
+    StanceV2OneCallResult,
     normalize_legacy_label,
 )
 from stance_detector import StanceDetector
@@ -123,6 +124,55 @@ def _format_key_messages_block(key_messages: list[KeyMessageRef]) -> str:
             for sentence in km.related_sentences:
                 lines.append(f"  related_sentence: {sentence}")
     return "\n".join(lines)
+
+
+# -- shared PairOutput builders, used by both StancePolicyEngineV2 and
+# OneCallPolicyEngineV2 -------------------------------------------------
+
+
+def _accepted(
+    context: CommentContext,
+    km: KeyMessageRef,
+    stance: StanceLabelV2,
+    basis: str,
+    comment_evidence: list[str],
+    source_evidence: list[str],
+    explanation: str,
+) -> PairOutput:
+    return PairOutput(
+        pair_id=compute_pair_id(context.contribution_id, km.text, context.comment_text),
+        key_message_id=km.key_message_id,
+        proposed_stance=stance.value,
+        status="accepted",
+        final_stance=stance.value,
+        basis=basis,
+        comment_evidence=comment_evidence,
+        source_evidence=source_evidence,
+        explanation=explanation,
+        run_id=context.run_id,
+    )
+
+
+def _needs_review(context: CommentContext, km: KeyMessageRef, reasons: list[str]) -> PairOutput:
+    return PairOutput(
+        pair_id=compute_pair_id(context.contribution_id, km.text, context.comment_text),
+        key_message_id=km.key_message_id,
+        proposed_stance=None,
+        status="needs_review",
+        review_reasons=reasons,
+        run_id=context.run_id,
+    )
+
+
+def _failed(context: CommentContext, km: KeyMessageRef) -> PairOutput:
+    return PairOutput(
+        pair_id=compute_pair_id(context.contribution_id, km.text, context.comment_text),
+        key_message_id=km.key_message_id,
+        proposed_stance=None,
+        status="failed",
+        review_reasons=["llm_call_failed"],
+        run_id=context.run_id,
+    )
 
 
 class StancePolicyEngineV2:
@@ -273,51 +323,6 @@ class StancePolicyEngineV2:
                 errors.append("neutral_missing_basis")
         return errors
 
-    # -- output builders --------------------------------------------------
-
-    def _accepted(
-        self,
-        context: CommentContext,
-        km: KeyMessageRef,
-        stance: StanceLabelV2,
-        basis: str,
-        comment_evidence: list[str],
-        source_evidence: list[str],
-        explanation: str,
-    ) -> PairOutput:
-        return PairOutput(
-            pair_id=compute_pair_id(context.contribution_id, km.text, context.comment_text),
-            key_message_id=km.key_message_id,
-            proposed_stance=stance.value,
-            status="accepted",
-            final_stance=stance.value,
-            basis=basis,
-            comment_evidence=comment_evidence,
-            source_evidence=source_evidence,
-            explanation=explanation,
-            run_id=context.run_id,
-        )
-
-    def _needs_review(self, context: CommentContext, km: KeyMessageRef, reasons: list[str]) -> PairOutput:
-        return PairOutput(
-            pair_id=compute_pair_id(context.contribution_id, km.text, context.comment_text),
-            key_message_id=km.key_message_id,
-            proposed_stance=None,
-            status="needs_review",
-            review_reasons=reasons,
-            run_id=context.run_id,
-        )
-
-    def _failed(self, context: CommentContext, km: KeyMessageRef) -> PairOutput:
-        return PairOutput(
-            pair_id=compute_pair_id(context.contribution_id, km.text, context.comment_text),
-            key_message_id=km.key_message_id,
-            proposed_stance=None,
-            status="failed",
-            review_reasons=["llm_call_failed"],
-            run_id=context.run_id,
-        )
-
     # -- orchestration ------------------------------------------------------
 
     async def _resolve_once(
@@ -330,12 +335,12 @@ class StancePolicyEngineV2:
 
         scope = await self._call_scope_stage(client, semaphore, context)
         if scope is None:
-            return {km.key_message_id: self._failed(context, km) for km in kms}
+            return {km.key_message_id: _failed(context, km) for km in kms}
 
         scope_errors = self._validate_scope(scope, context)
         if scope_errors:
             return {
-                km.key_message_id: self._needs_review(context, km, ["invalid_scope_output"] + scope_errors)
+                km.key_message_id: _needs_review(context, km, ["invalid_scope_output"] + scope_errors)
                 for km in kms
             }
 
@@ -343,7 +348,7 @@ class StancePolicyEngineV2:
 
         if scope.scope_type == ScopeType.WHOLE_CONTRIBUTION_APPROVAL:
             for km in kms:
-                outputs[km.key_message_id] = self._accepted(
+                outputs[km.key_message_id] = _accepted(
                     context, km, StanceLabelV2.IN_FAVOR, "general_approval",
                     scope.comment_evidence, [], scope.explanation,
                 )
@@ -351,7 +356,7 @@ class StancePolicyEngineV2:
 
         if scope.scope_type == ScopeType.UNRESOLVED:
             for km in kms:
-                outputs[km.key_message_id] = self._needs_review(
+                outputs[km.key_message_id] = _needs_review(
                     context, km, scope.uncertainty_flags or ["unresolved_scope"]
                 )
             return outputs
@@ -362,14 +367,14 @@ class StancePolicyEngineV2:
             stance_result = await self._call_stance_stage(client, semaphore, context, affected)
             if stance_result is None:
                 for km in affected:
-                    outputs[km.key_message_id] = self._failed(context, km)
+                    outputs[km.key_message_id] = _failed(context, km)
             else:
                 stance_errors = self._validate_stance(
                     stance_result, context, {km.key_message_id for km in affected}
                 )
                 if stance_errors:
                     for km in affected:
-                        outputs[km.key_message_id] = self._needs_review(
+                        outputs[km.key_message_id] = _needs_review(
                             context, km, ["invalid_stance_output"] + stance_errors
                         )
                 else:
@@ -377,7 +382,7 @@ class StancePolicyEngineV2:
                     for km in affected:
                         target = by_id.get(km.key_message_id)
                         if target is None:
-                            outputs[km.key_message_id] = self._needs_review(
+                            outputs[km.key_message_id] = _needs_review(
                                 context, km, ["target_missing_from_stance_result"]
                             )
                             continue
@@ -385,7 +390,7 @@ class StancePolicyEngineV2:
                             basis = target.neutral_basis.value if target.neutral_basis else NeutralBasis.NO_POSITION.value
                         else:
                             basis = "explicit_target"
-                        outputs[km.key_message_id] = self._accepted(
+                        outputs[km.key_message_id] = _accepted(
                             context, km, target.stance, basis,
                             target.comment_evidence, target.source_evidence, target.explanation,
                         )
@@ -394,12 +399,12 @@ class StancePolicyEngineV2:
             if km.key_message_id in outputs:
                 continue
             if scope.scope_type == ScopeType.MIXED_QUALIFIED and scope.general_support_extends_to_unaddressed:
-                outputs[km.key_message_id] = self._accepted(
+                outputs[km.key_message_id] = _accepted(
                     context, km, StanceLabelV2.IN_FAVOR, "general_approval",
                     scope.comment_evidence, [], scope.explanation,
                 )
             else:
-                outputs[km.key_message_id] = self._accepted(
+                outputs[km.key_message_id] = _accepted(
                     context, km, StanceLabelV2.NEUTRAL, NeutralBasis.UNADDRESSED.value, [], [], "",
                 )
 
@@ -435,8 +440,134 @@ class StancePolicyEngineV2:
                 if p is None or v is None:
                     continue
                 if p.status == "accepted" and v.status == "accepted" and p.final_stance != v.final_stance:
-                    primary[km.key_message_id] = self._needs_review(
+                    primary[km.key_message_id] = _needs_review(
                         context, km, ["verifier_disagreement"]
                     )
 
         return [primary[km.key_message_id] for km in context.key_messages]
+
+
+class OneCallPolicyEngineV2:
+    """Single-call policy v2 variant: scope and stance decided together.
+
+    Brief section 10's experiment matrix compares this against
+    StancePolicyEngineV2's two-stage design. Uses the ``stance_v2_one_call``
+    prompt and ``StanceV2OneCallResult`` schema (see policy_schemas.py),
+    validated the same way -- every key_message_id must be a real ID for
+    this comment, every target must be covered exactly once, and every
+    evidence quote must be an exact substring of the comment text. Invalid
+    or failed output never becomes a silent accepted+neutral result, same
+    as the two-stage engine.
+    """
+
+    def __init__(
+        self,
+        llm_handler: LLMHandler,
+        base_url: str,
+        model_name: str,
+        api_key: str = "",
+        enable_thinking: bool = False,
+        prompt_config_path: str = DEFAULT_PROMPT_CONFIG_PATH,
+    ) -> None:
+        """Initialize the engine and load the one-call prompt template.
+
+        Args:
+            llm_handler: Shared LLMHandler used for the call.
+            base_url: Endpoint base URL for the configured model.
+            model_name: Model identifier passed to the server.
+            api_key: Bearer token for the endpoint.
+            enable_thinking: Forwarded to LLMHandler.call_model.
+            prompt_config_path: Path to prompts/config.json.
+        """
+        self._llm = llm_handler
+        self._base_url = base_url
+        self._model_name = model_name
+        self._api_key = api_key
+        self._enable_thinking = enable_thinking
+
+        detector = StanceDetector()
+        cfg = detector.load_prompt_config(prompt_config_path, "stance_v2_one_call")
+        self._system = cfg["system"]
+        self._user_template = Template(cfg["user_template"])
+
+    def _build_messages(self, context: CommentContext) -> tuple[str, list[dict]]:
+        user = self._user_template.safe_substitute(
+            contribution_text=context.contribution_text or "(nicht verfügbar)",
+            key_messages_block=_format_key_messages_block(context.key_messages),
+            comment_text=context.comment_text,
+        )
+        return self._system, [{"role": "user", "content": user}]
+
+    @staticmethod
+    def _validate(result: StanceV2OneCallResult, context: CommentContext) -> list[str]:
+        errors: list[str] = []
+        valid_ids = {km.key_message_id for km in context.key_messages}
+        seen_ids: set[str] = set()
+        for target in result.targets:
+            if target.key_message_id not in valid_ids:
+                errors.append(f"unknown_key_message_id:{target.key_message_id}")
+                continue
+            seen_ids.add(target.key_message_id)
+            for evidence in target.comment_evidence:
+                if evidence not in context.comment_text:
+                    errors.append("evidence_not_substring_of_comment")
+        missing = valid_ids - seen_ids
+        if missing:
+            errors.append(f"missing_targets:{sorted(missing)}")
+        return errors
+
+    async def resolve_comment(
+        self, client: httpx.AsyncClient, semaphore, context: CommentContext
+    ) -> list[PairOutput]:
+        """Resolve every key message's stance for one comment in a single LLM call.
+
+        Args:
+            client: Async HTTP client for the LLM request.
+            semaphore: Concurrency guard.
+            context: The comment's built CommentContext.
+
+        Returns:
+            One PairOutput per key message in context.key_messages, in the
+            same order.
+        """
+        kms = context.key_messages
+        if not kms:
+            return []
+
+        system, messages = self._build_messages(context)
+        raw = await self._llm.call_model(
+            client=client,
+            base_url=self._base_url,
+            model_name=self._model_name,
+            system=system,
+            messages=messages,
+            semaphore=semaphore,
+            enable_thinking=self._enable_thinking,
+            api_key=self._api_key,
+            response_schema=StanceV2OneCallResult,
+        )
+        if raw is None:
+            return [_failed(context, km) for km in kms]
+
+        try:
+            result = StanceV2OneCallResult.model_validate(_normalize_stance_fields(raw))
+        except Exception:
+            return [_needs_review(context, km, ["invalid_one_call_output"]) for km in kms]
+
+        errors = self._validate(result, context)
+        if errors:
+            return [_needs_review(context, km, ["invalid_one_call_output"] + errors) for km in kms]
+
+        by_id = {t.key_message_id: t for t in result.targets}
+        return [
+            _accepted(
+                context,
+                km,
+                by_id[km.key_message_id].stance,
+                by_id[km.key_message_id].basis.value,
+                by_id[km.key_message_id].comment_evidence,
+                [],
+                by_id[km.key_message_id].explanation,
+            )
+            for km in kms
+        ]

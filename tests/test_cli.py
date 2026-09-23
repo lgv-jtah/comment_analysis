@@ -360,3 +360,57 @@ def test_benchmark_command_scores_against_existing_reference_and_folds(monkeypat
     out = capsys.readouterr().out
     assert "Limiting to the first 5 comments" in out
     assert "Pooled out-of-fold" in out
+
+
+# ---------------------------------------------------------------------------
+# historical-baseline
+# ---------------------------------------------------------------------------
+
+
+def test_historical_baseline_command_writes_predictions_and_scores_them(tmp_path, capsys):
+    reference_path = tmp_path / "pairs.parquet"
+    pd.DataFrame(
+        [
+            {
+                "pair_id": "p1",
+                "contribution_id": 1,
+                "key_message": "km1",
+                "comment_text": "c1",
+                "resolution_status": "resolved",
+                "reference_label": "in_favor",
+                "established_original_label": "in_favor",
+            },
+            {
+                "pair_id": "p2",
+                "contribution_id": 1,
+                "key_message": "km2",
+                "comment_text": "c2",
+                "resolution_status": "resolved",
+                "reference_label": "neutral",
+                "established_original_label": "against",
+            },
+        ]
+    ).to_parquet(reference_path)
+
+    output_path = tmp_path / "historical_predictions.parquet"
+
+    cli.main(
+        [
+            "historical-baseline",
+            "--output",
+            str(output_path),
+            "--reference",
+            str(reference_path),
+            "--folds",
+            str(tmp_path / "no_such_folds.json"),
+        ]
+    )
+
+    assert output_path.exists()
+    written = pd.read_parquet(output_path)
+    assert len(written) == 2
+    assert set(written["status"]) == {"accepted"}
+
+    out = capsys.readouterr().out
+    assert "Wrote 2 historical-baseline predictions" in out
+    assert "Overall" in out
