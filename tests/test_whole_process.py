@@ -1199,7 +1199,7 @@ def test_run_v2_passes_contribution_text_into_the_context(monkeypatch):
         }
     )
 
-    asyncio.run(processor.run_v2(df))
+    asyncio.run(processor.run_v2(df, verify_ionos=False))
 
     assert any("Ein ausführlicher Beitragstext." in text for text in seen_contribution_texts)
 
@@ -1243,7 +1243,7 @@ def test_run_v2_related_sentences_reach_the_context(monkeypatch):
         }
     )
 
-    asyncio.run(processor.run_v2(df))
+    asyncio.run(processor.run_v2(df, verify_ionos=False))
 
     assert any("Ein Originalsatz aus dem Beitrag." in p for p in seen_stance_prompts)
 
@@ -1268,7 +1268,7 @@ def test_run_v2_flattens_one_row_per_key_message(monkeypatch):
         }
     )
 
-    result = asyncio.run(processor.run_v2(df))
+    result = asyncio.run(processor.run_v2(df, verify_ionos=False))
 
     assert len(result) == 2  # one comment x two key messages
     assert set(result["key_message"]) == {"km1", "km2"}
@@ -1290,7 +1290,7 @@ def test_run_v2_skips_contribution_with_no_key_messages(monkeypatch):
         }
     )
 
-    result = asyncio.run(processor.run_v2(df))
+    result = asyncio.run(processor.run_v2(df, verify_ionos=False))
 
     assert result.empty
 
@@ -1312,7 +1312,7 @@ def test_run_v2_failed_llm_call_produces_failed_status_not_silent_neutral(monkey
         }
     )
 
-    result = asyncio.run(processor.run_v2(df))
+    result = asyncio.run(processor.run_v2(df, verify_ionos=False))
 
     assert len(result) == 1
     assert result.iloc[0]["status"] == "failed"
@@ -1335,7 +1335,7 @@ def test_run_v2_does_not_call_the_reaction_classifier(monkeypatch):
         }
     )
 
-    asyncio.run(processor.run_v2(df))
+    asyncio.run(processor.run_v2(df, verify_ionos=False))
 
     assert classifier.load_called_with is None
 
@@ -1482,3 +1482,117 @@ def test_run_whole_process_v2_no_source_file_returns_early(monkeypatch, tmp_data
     asyncio.run(main.run_whole_process_v2())
 
     assert list(tmp_data_dir.glob("whole_process_v2_*.parquet")) == []
+
+
+def test_run_v2_verifies_ionos_routing_before_doing_any_work(monkeypatch):
+    """verify_ionos=True (the default) must fail fast, before extraction or
+    any LLM call, when the configured model isn't IONOS-routed."""
+    km_list = [{"key_message": "km1", "key_message_type": "Wunsch", "related_sentences": []}]
+    processor = _make_processor(monkeypatch, km_list)
+
+    extractor_called = {"called": False}
+
+    async def tracking_extract(**kwargs):
+        extractor_called["called"] = True
+        return km_list
+
+    processor._extractor.extract = tracking_extract
+
+    import ionos_config
+
+    def fake_get(*a, **k):
+        return type(
+            "R",
+            (),
+            {
+                "raise_for_status": lambda self: None,
+                "json": lambda self: {
+                    "data": [
+                        {
+                            "model_name": "test-model",
+                            "litellm_params": {"model": "anthropic/claude-x", "api_base": None},
+                        }
+                    ]
+                },
+            },
+        )()
+
+    monkeypatch.setattr(ionos_config.httpx, "get", fake_get)
+
+    df = pd.DataFrame(
+        {
+            "contribution_id": [101],
+            "contributionContent": ["Beitragstext."],
+            "comments": [["Super Idee!"]],
+        }
+    )
+
+    with pytest.raises(ionos_config.IonosVerificationError):
+        asyncio.run(processor.run_v2(df))
+
+    assert extractor_called["called"] is False
+
+
+def test_run_v2_proceeds_when_ionos_routing_confirmed(monkeypatch):
+    km_list = [{"key_message": "km1", "key_message_type": "Wunsch", "related_sentences": []}]
+    processor = _make_processor(
+        monkeypatch, km_list, call_model=_make_v2_call_model(lambda kwargs: _scope_response())
+    )
+
+    import ionos_config
+
+    def fake_get(*a, **k):
+        return type(
+            "R",
+            (),
+            {
+                "raise_for_status": lambda self: None,
+                "json": lambda self: {
+                    "data": [
+                        {
+                            "model_name": "test-model",
+                            "litellm_params": {
+                                "model": "openai/mistralai/Mistral-Nemo-Instruct-2407",
+                                "api_base": "https://openai.inference.de-txl.ionos.com/v1/",
+                            },
+                        }
+                    ]
+                },
+            },
+        )()
+
+    monkeypatch.setattr(ionos_config.httpx, "get", fake_get)
+
+    df = pd.DataFrame(
+        {
+            "contribution_id": [101],
+            "contributionContent": ["Beitragstext."],
+            "comments": [["Super Idee!"]],
+        }
+    )
+
+    result = asyncio.run(processor.run_v2(df))
+
+    assert len(result) == 1
+    assert result.iloc[0]["final_stance"] == "in_favor"
+
+
+def test_run_whole_process_v2_reports_ionos_verification_failure_cleanly(monkeypatch, tmp_data_dir, capsys):
+    source = tmp_data_dir / "input.parquet"
+    pd.DataFrame(
+        {"contribution_id": [1], "contributionContent": ["Beitrag"], "comments": [["c1"]]}
+    ).to_parquet(source)
+
+    import ionos_config
+
+    class RaisingWholeProcess(FakeWholeProcess):
+        async def run_v2(self, df, proceeding_description="", verifier_enabled=False):
+            raise ionos_config.IonosVerificationError("model 'x' is routed to Anthropic, not IONOS")
+
+    monkeypatch.setattr(main, "WholeProcess", RaisingWholeProcess)
+    monkeypatch.setattr("builtins.input", lambda *a: "1")
+
+    asyncio.run(main.run_whole_process_v2())
+
+    assert list(tmp_data_dir.glob("whole_process_v2_*.parquet")) == []
+    assert "IONOS routing check failed" in capsys.readouterr().out

@@ -18,6 +18,7 @@ from rich.markup import escape
 
 from classifier import ReactionClassifier
 from context_builder import build_comment_context
+from ionos_config import verify_ionos_only
 from key_message_extractor import KeyMessageExtraction
 from llm_handler import LLMHandler
 from policy import StancePolicyEngineV2
@@ -504,6 +505,7 @@ class WholeProcess:
         df: pd.DataFrame,
         proceeding_description: str = "",
         verifier_enabled: bool = False,
+        verify_ionos: bool = True,
     ) -> pd.DataFrame:
         """Run the pipeline using the policy v2 engine (additive; run() is untouched).
 
@@ -531,11 +533,25 @@ class WholeProcess:
                 to the key-message extractor.
             verifier_enabled: Forwarded to StancePolicyEngineV2; see its
                 docstring.
+            verify_ionos: When True (default), fail fast via
+                ionos_config.verify_ionos_only() before doing any work if
+                self.stance_model_name doesn't resolve to an IONOS-routed
+                entry on the configured proxy. Set False only for offline
+                tests that mock the LLM calls entirely and have no proxy to
+                verify against.
 
         Returns:
             A DataFrame with :data:`OUTPUT_COLUMNS_V2`; empty if no rows are
             produced.
+
+        Raises:
+            ionos_config.IonosVerificationError: If verify_ionos is True and
+                the configured model is not IONOS-routed (or the proxy
+                doesn't recognize it at all).
         """
+        if verify_ionos:
+            verify_ionos_only(self.stance_model_name, self.stance_base_url, self._stance_api_key)
+
         engine = StancePolicyEngineV2(
             llm_handler=self._llm_handler,
             base_url=self.stance_base_url,

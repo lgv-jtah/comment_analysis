@@ -28,6 +28,7 @@ from key_message_judge import KeyMessageJudge
 from comment_fetcher import CommentFetcher
 from contributions_with_comments_dataset import ContributionsWithCommentsDataset
 from whole_process import WholeProcess
+from ionos_config import IonosVerificationError
 from dotenv import load_dotenv
 from collections import defaultdict
 import os
@@ -1138,7 +1139,11 @@ async def run_whole_process_v2() -> None:
         stance_api_key=STANCE_LLM_API_KEY,
         stance_enable_thinking=STANCE_LLM_ENABLE_THINKING,
     )
-    result_df = await processor.run_v2(df, proceeding_description="")
+    try:
+        result_df = await processor.run_v2(df, proceeding_description="")
+    except IonosVerificationError as e:
+        console.print(f"[red]IONOS routing check failed — aborting before any inference: {e}[/red]")
+        return
     result_df.to_parquet(output_path)
     console.print(f"[green]Whole process (v2) saved to {output_path} — {len(result_df)} rows written[/green]")
 

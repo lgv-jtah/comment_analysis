@@ -16,10 +16,11 @@ from llm_handler import LLMHandler, normalize_stance_label
 class FakeResponse:
     """Minimal stand-in for httpx.Response used by the mocked client."""
 
-    def __init__(self, content, status_code=200):
+    def __init__(self, content, status_code=200, headers=None):
         self._content = content
         self.status_code = status_code
         self.text = content if isinstance(content, str) else json.dumps(content)
+        self.headers = headers or {}
 
     def json(self):
         return {
@@ -29,7 +30,9 @@ class FakeResponse:
     def raise_for_status(self):
         if self.status_code >= 400:
             request = httpx.Request("POST", "http://testserver/v1/chat/completions")
-            response = httpx.Response(self.status_code, request=request)
+            response = httpx.Response(
+                self.status_code, request=request, headers=self.headers
+            )
             raise httpx.HTTPStatusError(
                 "error", request=request, response=response
             )
@@ -50,6 +53,28 @@ class CapturingClient:
         if self._raise_exc is not None:
             raise self._raise_exc
         return self._response
+
+
+class SequenceClient:
+    """Fake httpx.AsyncClient returning a different outcome on each successive
+    post() call, for testing retry-then-succeed / retry-then-exhaust paths.
+
+    Each item in `outcomes` is either an Exception instance (raised) or a
+    response-like object (returned).
+    """
+
+    def __init__(self, outcomes):
+        self._outcomes = list(outcomes)
+        self.call_count = 0
+
+    async def post(self, url, **kwargs):
+        self.call_count += 1
+        outcome = self._outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
 
 
 def _call(client, **overrides):
@@ -202,3 +227,183 @@ def test_call_model_unrecognized_stance_passes_through():
     result = _call(client)
 
     assert result["stance"] == "GARBLED"
+
+
+# ── retry/backoff behavior ──────────────────────────────────────────
+
+_FAST_RETRY_KWARGS = dict(retry_base_delay=0.001, retry_max_delay=0.005)
+
+
+def test_429_retries_then_succeeds():
+    content = '{"stance": "in favor", "explanation": "x"}'
+    client = SequenceClient(
+        [FakeResponse("rate limited", status_code=429), FakeResponse(content)]
+    )
+
+    result = _call(client, max_retries=3, **_FAST_RETRY_KWARGS)
+
+    assert result == {"stance": "in favor", "explanation": "x"}
+    assert client.call_count == 2
+
+
+def test_5xx_retries_then_succeeds():
+    content = '{"stance": "neutral", "explanation": "x"}'
+    client = SequenceClient(
+        [FakeResponse("server error", status_code=503), FakeResponse(content)]
+    )
+
+    result = _call(client, max_retries=3, **_FAST_RETRY_KWARGS)
+
+    assert result == {"stance": "neutral", "explanation": "x"}
+    assert client.call_count == 2
+
+
+def test_retries_are_bounded_then_returns_none():
+    client = SequenceClient(
+        [
+            FakeResponse("e1", status_code=503),
+            FakeResponse("e2", status_code=503),
+            FakeResponse("e3", status_code=503),
+            FakeResponse("e4", status_code=503),  # never reached: max_retries=2 -> 3 total attempts
+        ]
+    )
+
+    result = _call(client, max_retries=2, **_FAST_RETRY_KWARGS)
+
+    assert result is None
+    assert client.call_count == 3  # 1 initial + 2 retries
+
+
+def test_zero_max_retries_matches_pre_retry_behavior():
+    client = SequenceClient([FakeResponse("server error", status_code=503)])
+
+    result = _call(client, max_retries=0, **_FAST_RETRY_KWARGS)
+
+    assert result is None
+    assert client.call_count == 1
+
+
+@pytest.mark.parametrize("status_code", [401, 403])
+def test_auth_errors_fail_fast_without_retrying(status_code):
+    client = SequenceClient(
+        [
+            FakeResponse("unauthorized", status_code=status_code),
+            FakeResponse("would succeed if retried"),  # must never be reached
+        ]
+    )
+
+    result = _call(client, max_retries=3, **_FAST_RETRY_KWARGS)
+
+    assert result is None
+    assert client.call_count == 1
+
+
+def test_non_retryable_4xx_still_fails_fast():
+    client = SequenceClient(
+        [
+            FakeResponse("not found", status_code=404),
+            FakeResponse("would succeed if retried"),
+        ]
+    )
+
+    result = _call(client, max_retries=3, **_FAST_RETRY_KWARGS)
+
+    assert result is None
+    assert client.call_count == 1
+
+
+def test_retry_after_header_is_honored(monkeypatch):
+    sleeps = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr("llm_handler.asyncio.sleep", fake_sleep)
+
+    content = '{"stance": "in favor", "explanation": "x"}'
+    client = SequenceClient(
+        [
+            FakeResponse("rate limited", status_code=429, headers={"Retry-After": "7"}),
+            FakeResponse(content),
+        ]
+    )
+
+    result = _call(client, max_retries=3, retry_base_delay=999, retry_max_delay=999)
+
+    assert result == {"stance": "in favor", "explanation": "x"}
+    # The Retry-After value (7s) was used, not the huge configured backoff.
+    assert 7 in sleeps
+
+
+def test_unparseable_retry_after_header_falls_back_to_computed_backoff():
+    content = '{"stance": "in favor", "explanation": "x"}'
+    client = SequenceClient(
+        [
+            FakeResponse("rate limited", status_code=429, headers={"Retry-After": "not-a-number"}),
+            FakeResponse(content),
+        ]
+    )
+
+    result = _call(client, max_retries=3, **_FAST_RETRY_KWARGS)
+
+    assert result == {"stance": "in favor", "explanation": "x"}
+    assert client.call_count == 2
+
+
+def test_unexpected_exception_returns_none():
+    class BoomClient:
+        async def post(self, *a, **k):
+            raise ValueError("something unrelated to HTTP broke")
+
+    result = _call(BoomClient())
+
+    assert result is None
+
+
+def test_request_error_retries_then_succeeds():
+    content = '{"stance": "in favor", "explanation": "x"}'
+    client = SequenceClient(
+        [httpx.ConnectError("connection reset"), FakeResponse(content)]
+    )
+
+    result = _call(client, max_retries=3, **_FAST_RETRY_KWARGS)
+
+    assert result == {"stance": "in favor", "explanation": "x"}
+    assert client.call_count == 2
+
+
+def test_request_error_bounded_then_returns_none():
+    client = SequenceClient(
+        [
+            httpx.ConnectError("e1"),
+            httpx.ConnectError("e2"),
+        ]
+    )
+
+    result = _call(client, max_retries=1, **_FAST_RETRY_KWARGS)
+
+    assert result is None
+    assert client.call_count == 2
+
+
+def test_rate_limit_delay_fires_once_per_call_not_per_retry_attempt(monkeypatch):
+    """RATE_LIMIT_DELAY spaces out distinct call_model() invocations, not
+    individual retry attempts within one invocation."""
+    sleep_calls = []
+
+    async def fake_sleep(seconds):
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr("llm_handler.asyncio.sleep", fake_sleep)
+
+    content = '{"stance": "in favor", "explanation": "x"}'
+    client = SequenceClient(
+        [FakeResponse("rate limited", status_code=429), FakeResponse(content)]
+    )
+
+    _call(client, max_retries=3, retry_base_delay=1, retry_max_delay=1)
+
+    import llm_handler
+
+    rate_limit_sleeps = [s for s in sleep_calls if s == llm_handler.RATE_LIMIT_DELAY]
+    assert len(rate_limit_sleeps) == 1
