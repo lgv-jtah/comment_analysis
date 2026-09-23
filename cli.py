@@ -121,6 +121,28 @@ def _print_metrics(title: str, metrics: evaluator_v2.EvaluationMetricsV2) -> Non
         console.print(table)
 
 
+def _print_basis_breakdown(predictions: pd.DataFrame, reference: pd.DataFrame) -> None:
+    """Print accepted accuracy split by `basis` (brief section 3).
+
+    Historical reference labels predate the general-approval-propagation
+    policy, so basis="general_approval" predictions routinely disagree
+    with them for reasons unrelated to prediction quality -- see
+    docs/phase5_screening_results.md. Printed after every metrics report
+    so this split is never missed rather than requiring ad-hoc analysis.
+    """
+    by_basis = evaluator_v2.accepted_accuracy_by_basis(predictions, reference)
+    if not by_basis:
+        return
+    table = Table(title="Accepted accuracy by basis (brief section 3: report separately)")
+    table.add_column("basis")
+    table.add_column("n", justify="right")
+    table.add_column("correct", justify="right")
+    table.add_column("accuracy", justify="right")
+    for basis, bm in sorted(by_basis.items()):
+        table.add_row(basis, str(bm.n), str(bm.correct), f"{bm.accuracy:.3f}")
+    console.print(table)
+
+
 def _asdict_class_metrics(cm: evaluator_v2.ClassMetrics) -> dict:
     return {
         "label": cm.label,
@@ -161,6 +183,8 @@ def _run_evaluate(args: argparse.Namespace) -> None:
             console.print(f"[yellow]Folds file not found at {folds_path}; scoring without fold grouping.[/yellow]")
         result_for_output = evaluator_v2.evaluate(predictions, reference)
         _print_metrics("Overall", result_for_output)
+
+    _print_basis_breakdown(predictions, reference)
 
     if args.output:
         output_path = Path(args.output)
@@ -217,6 +241,7 @@ def _run_benchmark(args: argparse.Namespace) -> None:
             _print_metrics("Pooled out-of-fold", by_fold["pooled"])
         else:
             _print_metrics("Overall", evaluator_v2.evaluate(predictions, reference))
+        _print_basis_breakdown(predictions, reference)
     else:
         console.print(f"[yellow]Reference file not found at {reference_path}; skipping scoring.[/yellow]")
 

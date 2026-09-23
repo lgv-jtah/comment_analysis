@@ -266,32 +266,78 @@ predictions themselves. **Directionally correct, cumulatively real, but
 still not close to closing the gap** with the historical baseline's
 0.748.
 
+## The decisive finding: accepted-but-wrong predictions, split by `basis`
+
+Pulled the 44 accepted-but-wrong pairs from the v3 run (98 accepted, 54
+correct) and split accuracy by `PairOutput.basis` instead of looking at
+them as one undifferentiated pool:
+
+| basis | n (accepted) | correct | accuracy |
+|---|---|---|---|
+| explicit_target | 25 | 21 | **0.840** |
+| general_approval | 27 | 3 | **0.111** |
+| no_position | 1 | 1 | 1.000 |
+| unaddressed | 45 | 29 | 0.644 |
+
+**`general_approval` is the entire story.** Its accuracy (0.111) is
+catastrophic and every one of its 24 wrong predictions has the identical
+shape: the historical reference label is `neutral`, the policy predicted
+`in_favor` (`"Stimmt"`, `"In der Tat."`, `"Klingt smart! Unbedingt
+technisch untersuchen!"` -- blanket-agreement comments, propagated to
+every key message per the brief's own specification). This is not a new
+finding in kind (the general-approval/historical-label divergence was
+already identified as a contributor earlier in this document) but it is
+a much stronger finding in *degree* than previously estimated: earlier
+analysis (counting it as a share of *all* errors, review-routed included)
+put it at "up to 38% of errors." Isolated to just the accepted-and-wrong
+pool and measured as its own basis's accuracy, it is by far the dominant
+term.
+
+**Excluding `general_approval` entirely, accepted_accuracy on the rest
+(`explicit_target` + `unaddressed` + `no_position`) is 51/71 = 0.718** --
+within a few points of the historical baseline's 0.748 on this same
+fold. `explicit_target` (0.840) is actually *better* than the historical
+baseline. `unaddressed` (0.644) is the one place with room to improve on
+its own merits, but it is a secondary effect next to `general_approval`.
+
+**Conclusion: the new policy-v2 architecture is not, in itself,
+meaningfully worse than the historical system.** Nearly the entire
+measured gap traces to one specific, deliberate design choice --
+propagating blanket contribution-level approval to every key message --
+disagreeing with how the historical annotator scored those exact same
+pairs (she evidently did not apply blanket propagation; she scored
+per-key-message and defaulted to `neutral` when a comment didn't clearly
+address that specific key message, even amid general positive sentiment).
+This is precisely what brief section 3 predicted and told us not to hide
+or conflate into one score.
+
+**Code change**: added `evaluator_v2.accepted_accuracy_by_basis()` (and
+its `BasisMetrics` dataclass) so this split is computed and printed
+automatically after every `cli.py evaluate`/`benchmark` run (as an
+"Accepted accuracy by basis" table), rather than requiring the ad-hoc
+pandas analysis that found it this time. 5 new tests
+(`tests/test_evaluator_v2.py`, `tests/test_cli.py`), including that it
+degrades gracefully (returns `{}`) when a predictions file has no `basis`
+column at all, rather than crashing.
+
 ## Status
 
-**Still not decided which direction to pursue.** Four independent
-findings now point the same way: the new policy-v2 architecture, across
-every variant, every model, and two rounds of prompt/validation fixes,
-remains well below the historical baseline (best result so far:
-gptoss-120b verifier variant at 0.602 accepted_accuracy vs. 0.748
-historical). The two issues investigated so far (`missing_context`
-over-triggering, evidence-grounding rejections) were real but each only
-worth ~1-2pp of forced_choice_accuracy -- neither was the dominant
-driver. What's left unexamined:
-- **accepted_accuracy itself is flat at ~0.55-0.57 regardless of which
-  review-routing fix is applied** -- this means the core problem isn't
-  "too many pairs get declined," it's that a large fraction of the pairs
-  the pipeline *does* confidently answer are simply wrong. Neither fix so
-  far touched that. This needs its own investigation: pull the *accepted*
-  wrong predictions (not the review-routed ones) and read them by hand,
-  the same way the review-routing clusters were read.
-- Decide how to report the general-approval/historical-label divergence
-  in the final report: as brief section 3 requires, report both numbers
-  (against-historical and policy-compliant) rather than picking one --
-  this alone would recover a meaningful chunk of the apparent gap without
-  any further code/prompt change, since some of what's currently scored
-  "wrong" is the policy correctly doing what it was specified to do.
-- Once accepted-but-wrong predictions are understood, re-run the fold-0
-  screening comparison to confirm cumulative improvement, then proceed to
-  the full-cohort comparison and (separately, cross-repo) provisioning
-  Llama 3.3 70B / Mistral Small 24B on the LiteLLM proxy if a broader
-  model sweep is still wanted at that point.
+**Direction is now clear: the architecture works; the general-approval
+policy needs a reporting decision, not a bug fix.** Concretely, next
+steps:
+1. **Decide how to report the general-approval/historical-label split**
+   in the final report, per brief section 3 -- e.g. report
+   `accepted_accuracy` two ways: against historical labels as-is (what
+   the tables above show), and with `general_approval`-basis pairs
+   scored/reported separately rather than penalized against
+   pre-policy labels. This is a reporting decision, not further tuning,
+   and the brief explicitly asks for it rather than picking one number.
+2. Optionally, investigate `unaddressed` (0.644 accuracy, the one
+   remaining basis with real room to improve) the same way the two prior
+   clusters were investigated, though it is a secondary effect.
+3. Once the reporting approach is settled, re-run the fold-0 screening
+   comparison one more time with the by-basis view in hand to confirm the
+   overall picture, then proceed to the full-cohort comparison and
+   (separately, cross-repo) provisioning Llama 3.3 70B / Mistral Small
+   24B on the LiteLLM proxy if a broader model sweep is still wanted at
+   that point.

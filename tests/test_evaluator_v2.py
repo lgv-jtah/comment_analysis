@@ -2,6 +2,7 @@ import pandas as pd
 import pytest
 
 from evaluator_v2 import (
+    accepted_accuracy_by_basis,
     bootstrap_ci,
     evaluate,
     evaluate_by_fold,
@@ -211,6 +212,82 @@ def test_majority_class_baseline_clear_winner():
 
     assert label == "neutral"
     assert accuracy == pytest.approx(3 / 4)
+
+
+# ---------------------------------------------------------------------------
+# accepted_accuracy_by_basis
+#
+# Brief section 3: report general-approval predictions' accuracy separately
+# from everything else, since historical labels predate that policy.
+# ---------------------------------------------------------------------------
+
+
+def _pred_row_with_basis(pair_id, contribution_id, status, basis, proposed=None, final=None):
+    row = _pred_row(pair_id, contribution_id, status, proposed, final)
+    row["basis"] = basis
+    return row
+
+
+def test_accepted_accuracy_by_basis_splits_correctly():
+    reference = pd.DataFrame(
+        [
+            _ref_row("p1", "c1", "resolved", "neutral"),
+            _ref_row("p2", "c1", "resolved", "neutral"),
+            _ref_row("p3", "c2", "resolved", "in_favor"),
+        ]
+    )
+    predictions = pd.DataFrame(
+        [
+            # Both general_approval predictions say in_favor; only p3's
+            # reference actually agrees -- p1/p2 are wrong (neutral).
+            _pred_row_with_basis("p1", "c1", "accepted", "general_approval", "in_favor", "in_favor"),
+            _pred_row_with_basis("p2", "c1", "accepted", "general_approval", "in_favor", "in_favor"),
+            _pred_row_with_basis("p3", "c2", "accepted", "explicit_target", "in_favor", "in_favor"),
+        ]
+    )
+
+    by_basis = accepted_accuracy_by_basis(predictions, reference)
+
+    assert by_basis["general_approval"].n == 2
+    assert by_basis["general_approval"].correct == 0
+    assert by_basis["general_approval"].accuracy == pytest.approx(0.0)
+    assert by_basis["explicit_target"].n == 1
+    assert by_basis["explicit_target"].correct == 1
+    assert by_basis["explicit_target"].accuracy == pytest.approx(1.0)
+
+
+def test_accepted_accuracy_by_basis_excludes_non_accepted_and_ineligible():
+    reference = pd.DataFrame(
+        [
+            _ref_row("p1", "c1", "resolved", "in_favor"),
+            _ref_row("p2", "c1", "unresolved"),
+        ]
+    )
+    predictions = pd.DataFrame(
+        [
+            _pred_row_with_basis("p1", "c1", "needs_review", "general_approval", "in_favor", None),
+            _pred_row_with_basis("p2", "c1", "accepted", "general_approval", "in_favor", "in_favor"),
+        ]
+    )
+
+    by_basis = accepted_accuracy_by_basis(predictions, reference)
+
+    assert by_basis == {}
+
+
+def test_accepted_accuracy_by_basis_empty_predictions_returns_empty_dict():
+    reference = pd.DataFrame([_ref_row("p1", "c1", "resolved", "in_favor")])
+    predictions = pd.DataFrame(columns=["pair_id", "contribution_id", "status", "final_stance", "basis"])
+
+    assert accepted_accuracy_by_basis(predictions, reference) == {}
+
+
+def test_accepted_accuracy_by_basis_missing_basis_column_returns_empty_dict():
+    """A predictions file without a basis column (e.g. legacy) shouldn't crash."""
+    reference = pd.DataFrame([_ref_row("p1", "c1", "resolved", "in_favor")])
+    predictions = pd.DataFrame([_pred_row("p1", "c1", "accepted", "in_favor", "in_favor")])
+
+    assert accepted_accuracy_by_basis(predictions, reference) == {}
 
 
 # ---------------------------------------------------------------------------

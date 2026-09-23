@@ -156,6 +156,47 @@ def test_evaluate_command_writes_json_output(tmp_path):
     assert data["metrics"]["eligible_pairs"] == 2
 
 
+def test_evaluate_command_prints_basis_breakdown_when_basis_column_present(tmp_path, capsys):
+    reference = pd.DataFrame(
+        [
+            {"pair_id": "p1", "contribution_id": "1", "resolution_status": "resolved", "reference_label": "neutral"},
+        ]
+    )
+    reference_path = tmp_path / "pairs.parquet"
+    reference.to_parquet(reference_path)
+
+    predictions = pd.DataFrame(
+        [
+            {
+                "pair_id": "p1",
+                "contribution_id": "1",
+                "status": "accepted",
+                "proposed_stance": "in_favor",
+                "final_stance": "in_favor",
+                "basis": "general_approval",
+            },
+        ]
+    )
+    predictions_path = tmp_path / "predictions.parquet"
+    predictions.to_parquet(predictions_path)
+
+    cli.main(
+        [
+            "evaluate",
+            "--predictions",
+            str(predictions_path),
+            "--reference",
+            str(reference_path),
+            "--folds",
+            str(tmp_path / "no_such_folds.json"),
+        ]
+    )
+
+    out = capsys.readouterr().out
+    assert "Accepted accuracy by basis" in out
+    assert "general_approval" in out
+
+
 def test_evaluate_command_with_folds_prints_per_fold_and_pooled(tmp_path, capsys):
     reference_path = _write_reference(tmp_path)
     predictions_path = _write_predictions(tmp_path)

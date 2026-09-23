@@ -194,6 +194,65 @@ def evaluate(predictions: pd.DataFrame, reference: pd.DataFrame) -> EvaluationMe
     )
 
 
+@dataclass
+class BasisMetrics:
+    """Accepted accuracy for one `basis` value (e.g. "general_approval").
+
+    Brief section 3: "Existing annotations do not fully match the new
+    general-approval policy. Report results against historical labels
+    separately from policy-compliance checks." Phase 5's fold-0 screening
+    investigation (docs/phase5_screening_results.md) found this split to
+    be highly diagnostic in practice: accepted_accuracy for
+    basis="general_approval" predictions was 0.111 versus 0.718 for every
+    other basis combined, on the same run -- because the historical
+    reference labels predate the general-approval-propagation policy, not
+    because the non-general-approval predictions are unreliable. This
+    breakdown surfaces that split automatically instead of requiring
+    ad-hoc analysis after every run.
+
+    Attributes:
+        basis: The PairOutput.basis value shared by this group (e.g.
+            "general_approval", "explicit_target", "unaddressed").
+        n: Accepted, eligible pairs with this basis.
+        correct: Of those, how many matched the reference label.
+        accuracy: correct / n, or 0.0 if n is 0.
+    """
+
+    basis: str
+    n: int
+    correct: int
+    accuracy: float
+
+
+def accepted_accuracy_by_basis(predictions: pd.DataFrame, reference: pd.DataFrame) -> dict[str, BasisMetrics]:
+    """Splits accepted-pair accuracy by `basis`, per brief section 3.
+
+    Args:
+        predictions: OUTPUT_COLUMNS_V2-shaped rows, including a `basis`
+            column.
+        reference: dataset/pairs.parquet's contents.
+
+    Returns:
+        basis -> BasisMetrics, for every basis value present among
+        accepted, eligible pairs. Empty if there are none, or if
+        predictions has no "basis" column (e.g. legacy/pre-basis
+        predictions files).
+    """
+    if "basis" not in predictions.columns:
+        return {}
+
+    merged = _merge(predictions, reference)
+    eligible = merged[merged["resolution_status"] == "resolved"]
+    accepted = eligible[eligible["status"] == "accepted"]
+
+    result: dict[str, BasisMetrics] = {}
+    for basis, group in accepted.groupby("basis"):
+        n = len(group)
+        correct = int((group["final_stance"] == group["reference_label"]).sum())
+        result[str(basis)] = BasisMetrics(basis=str(basis), n=n, correct=correct, accuracy=correct / n if n else 0.0)
+    return result
+
+
 def majority_class_baseline(reference: pd.DataFrame) -> tuple[str | None, float]:
     """Accuracy of always predicting the most common reference label.
 
