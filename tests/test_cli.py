@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -66,3 +67,296 @@ def test_audit_command_invokes_build_and_write_dataset(monkeypatch, tmp_path, ca
 def test_no_subcommand_raises_usage_error():
     with pytest.raises(SystemExit):
         cli.main([])
+
+
+# ---------------------------------------------------------------------------
+# evaluate
+# ---------------------------------------------------------------------------
+
+
+def _write_reference(tmp_path) -> Path:
+    reference = pd.DataFrame(
+        [
+            {"pair_id": "p1", "contribution_id": "1", "resolution_status": "resolved", "reference_label": "in_favor"},
+            {"pair_id": "p2", "contribution_id": "1", "resolution_status": "resolved", "reference_label": "neutral"},
+        ]
+    )
+    path = tmp_path / "pairs.parquet"
+    reference.to_parquet(path)
+    return path
+
+
+def _write_predictions(tmp_path) -> Path:
+    predictions = pd.DataFrame(
+        [
+            {
+                "pair_id": "p1",
+                "contribution_id": "1",
+                "status": "accepted",
+                "proposed_stance": "in_favor",
+                "final_stance": "in_favor",
+            },
+            {
+                "pair_id": "p2",
+                "contribution_id": "1",
+                "status": "accepted",
+                "proposed_stance": "in_favor",
+                "final_stance": "in_favor",
+            },
+        ]
+    )
+    path = tmp_path / "predictions.parquet"
+    predictions.to_parquet(path)
+    return path
+
+
+def test_evaluate_command_without_folds_prints_overall_metrics(tmp_path, capsys):
+    reference_path = _write_reference(tmp_path)
+    predictions_path = _write_predictions(tmp_path)
+
+    cli.main(
+        [
+            "evaluate",
+            "--predictions",
+            str(predictions_path),
+            "--reference",
+            str(reference_path),
+            "--folds",
+            str(tmp_path / "no_such_folds.json"),
+        ]
+    )
+
+    out = capsys.readouterr().out
+    assert "Overall" in out
+    assert "Majority-class baseline" in out
+
+
+def test_evaluate_command_writes_json_output(tmp_path):
+    reference_path = _write_reference(tmp_path)
+    predictions_path = _write_predictions(tmp_path)
+    output_path = tmp_path / "metrics.json"
+
+    cli.main(
+        [
+            "evaluate",
+            "--predictions",
+            str(predictions_path),
+            "--reference",
+            str(reference_path),
+            "--folds",
+            str(tmp_path / "no_such_folds.json"),
+            "--output",
+            str(output_path),
+        ]
+    )
+
+    assert output_path.exists()
+    data = json.loads(output_path.read_text(encoding="utf-8"))
+    assert "metrics" in data
+    assert data["metrics"]["eligible_pairs"] == 2
+
+
+def test_evaluate_command_with_folds_prints_per_fold_and_pooled(tmp_path, capsys):
+    reference_path = _write_reference(tmp_path)
+    predictions_path = _write_predictions(tmp_path)
+    folds_path = tmp_path / "folds_v1.json"
+    folds_path.write_text(
+        json.dumps(
+            {
+                "seed": 1,
+                "n_splits": 1,
+                "grouping_key": "contribution_id",
+                "near_duplicate_check": "skipped_no_contribution_text_available",
+                "dup_groups_merged": 0,
+                "folds": [{"train_contribution_ids": [], "test_contribution_ids": ["1"]}],
+                "schema_version": "folds_v1",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cli.main(
+        [
+            "evaluate",
+            "--predictions",
+            str(predictions_path),
+            "--reference",
+            str(reference_path),
+            "--folds",
+            str(folds_path),
+        ]
+    )
+
+    out = capsys.readouterr().out
+    assert "Fold 0" in out
+    assert "Pooled out-of-fold" in out
+
+
+# ---------------------------------------------------------------------------
+# benchmark
+# ---------------------------------------------------------------------------
+
+
+def test_benchmark_command_invokes_run_benchmark_and_writes_predictions(monkeypatch, tmp_path, capsys):
+    source_path = tmp_path / "source.parquet"
+    pd.DataFrame(
+        [
+            {
+                "contribution_id": 1,
+                "contributionContent": "Beitrag",
+                "key_message": "km1",
+                "key_message_type": "Wunsch",
+                "related_sentences": ["s1"],
+                "comment_text": "c1",
+            }
+        ]
+    ).to_parquet(source_path)
+
+    calls = {}
+
+    async def fake_run_benchmark(**kwargs):
+        calls["kwargs"] = kwargs
+        return pd.DataFrame(
+            [
+                {
+                    "contribution_id": "1",
+                    "contributionContent": "Beitrag",
+                    "key_message_id": "1:km1",
+                    "key_message": "km1",
+                    "comment_text": "c1",
+                    "pair_id": "abc",
+                    "status": "accepted",
+                    "proposed_stance": "in_favor",
+                    "final_stance": "in_favor",
+                    "basis": "general_approval",
+                    "comment_evidence": [],
+                    "source_evidence": [],
+                    "explanation": "",
+                    "review_reasons": [],
+                    "policy_version": "v2",
+                    "run_id": "run-1",
+                    "extraction_model_name": None,
+                    "stance_model_name": "test-model",
+                }
+            ]
+        )
+
+    monkeypatch.setattr(cli, "run_benchmark", fake_run_benchmark)
+
+    output_path = tmp_path / "predictions.parquet"
+    reference_path = tmp_path / "nonexistent_reference.parquet"
+
+    cli.main(
+        [
+            "benchmark",
+            "--source",
+            str(source_path),
+            "--output",
+            str(output_path),
+            "--reference",
+            str(reference_path),
+            "--model-name",
+            "test-model",
+            "--base-url",
+            "http://testserver",
+            "--no-verify-ionos",
+        ]
+    )
+
+    assert output_path.exists()
+    assert calls["kwargs"]["verify_ionos"] is False
+    assert calls["kwargs"]["model_name"] == "test-model"
+
+    out = capsys.readouterr().out
+    assert "Wrote 1 predictions" in out
+    assert "Reference file not found" in out
+
+
+def test_benchmark_command_scores_against_existing_reference_and_folds(monkeypatch, tmp_path, capsys):
+    source_path = tmp_path / "source.parquet"
+    pd.DataFrame(
+        [
+            {
+                "contribution_id": 1,
+                "contributionContent": "Beitrag",
+                "key_message": "km1",
+                "key_message_type": "Wunsch",
+                "related_sentences": ["s1"],
+                "comment_text": "c1",
+            }
+        ]
+    ).to_parquet(source_path)
+
+    reference_path = tmp_path / "pairs.parquet"
+    pd.DataFrame(
+        [{"pair_id": "abc", "contribution_id": "1", "resolution_status": "resolved", "reference_label": "in_favor"}]
+    ).to_parquet(reference_path)
+
+    folds_path = tmp_path / "folds_v1.json"
+    folds_path.write_text(
+        json.dumps(
+            {
+                "seed": 1,
+                "n_splits": 1,
+                "grouping_key": "contribution_id",
+                "near_duplicate_check": "skipped_no_contribution_text_available",
+                "dup_groups_merged": 0,
+                "folds": [{"train_contribution_ids": [], "test_contribution_ids": ["1"]}],
+                "schema_version": "folds_v1",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    async def fake_run_benchmark(**kwargs):
+        return pd.DataFrame(
+            [
+                {
+                    "contribution_id": "1",
+                    "contributionContent": "Beitrag",
+                    "key_message_id": "1:km1",
+                    "key_message": "km1",
+                    "comment_text": "c1",
+                    "pair_id": "abc",
+                    "status": "accepted",
+                    "proposed_stance": "in_favor",
+                    "final_stance": "in_favor",
+                    "basis": "general_approval",
+                    "comment_evidence": [],
+                    "source_evidence": [],
+                    "explanation": "",
+                    "review_reasons": [],
+                    "policy_version": "v2",
+                    "run_id": "run-1",
+                    "extraction_model_name": None,
+                    "stance_model_name": "test-model",
+                }
+            ]
+        )
+
+    monkeypatch.setattr(cli, "run_benchmark", fake_run_benchmark)
+
+    cli.main(
+        [
+            "benchmark",
+            "--source",
+            str(source_path),
+            "--output",
+            str(tmp_path / "predictions.parquet"),
+            "--reference",
+            str(reference_path),
+            "--folds",
+            str(folds_path),
+            "--model-name",
+            "test-model",
+            "--base-url",
+            "http://testserver",
+            "--no-verify-ionos",
+            "--limit",
+            "5",
+        ]
+    )
+
+    out = capsys.readouterr().out
+    assert "Limiting to the first 5 comments" in out
+    assert "Pooled out-of-fold" in out

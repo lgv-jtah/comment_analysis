@@ -23,12 +23,21 @@ class EvaluationReport:
 
     Attributes:
         accuracy: Fraction of evaluated rows whose prediction matched gold.
+            Kept with its original semantics (skipped rows excluded from the
+            denominator) for exact reproduction of historical reports.
         per_class: Gold label -> {"precision", "recall", "f1", "support"}.
         confusion_matrix: gold_label -> {predicted_label -> count}.
         total_rows: Count of valid gold rows.
         evaluated_rows: Rows with a non-None prediction present.
         skipped_rows: total_rows - evaluated_rows.
         labels: Sorted list of gold labels observed among evaluated rows.
+        forced_choice_accuracy: Fraction of ALL gold rows (total_rows, not
+            just evaluated_rows) whose prediction matched gold -- a missing/
+            None prediction counts as incorrect here rather than being
+            excluded, per STANCE_PIPELINE_IMPLEMENTATION_BRIEF.md section 2:
+            "Forced-choice accuracy: [...] Count failed predictions as
+            incorrect for this end-to-end metric." This is the additional,
+            stricter metric alongside accuracy, not a replacement for it.
     """
 
     accuracy: float
@@ -38,6 +47,7 @@ class EvaluationReport:
     evaluated_rows: int
     skipped_rows: int
     labels: list[str]
+    forced_choice_accuracy: float = 0.0
 
 
 @dataclass
@@ -404,6 +414,10 @@ class StanceEvaluator:
             }
 
         accuracy = total_tp / evaluated_rows if evaluated_rows > 0 else 0.0
+        # Skipped rows (missing/None prediction) count as incorrect here,
+        # against the full total_rows denominator -- see EvaluationReport's
+        # forced_choice_accuracy docstring.
+        forced_choice_accuracy = total_tp / total_rows if total_rows > 0 else 0.0
 
         return EvaluationReport(
             accuracy=accuracy,
@@ -413,6 +427,7 @@ class StanceEvaluator:
             evaluated_rows=evaluated_rows,
             skipped_rows=skipped_rows,
             labels=gold_labels,
+            forced_choice_accuracy=forced_choice_accuracy,
         )
 
     def format_report(self, report: EvaluationReport) -> str:
@@ -429,6 +444,7 @@ class StanceEvaluator:
         lines.append("=== Stance Evaluation Report ===")
         lines.append(
             f"accuracy={report.accuracy:.4f}  "
+            f"forced_choice_accuracy={report.forced_choice_accuracy:.4f}  "
             f"evaluated={report.evaluated_rows}  "
             f"skipped={report.skipped_rows}  "
             f"total={report.total_rows}"

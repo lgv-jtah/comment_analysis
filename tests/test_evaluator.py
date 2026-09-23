@@ -101,6 +101,10 @@ def test_missing_and_none_predictions_excluded_but_reported():
 
     # Only rows 0, 2, 4 count. 2 of 3 correct.
     assert report.accuracy == pytest.approx(2 / 3)
+    # forced_choice_accuracy uses the FULL denominator (5 total_rows): the 2
+    # skipped rows (1 explicit None, 1 absent) count as incorrect, so it's
+    # 2 correct out of 5, not 2 out of 3.
+    assert report.forced_choice_accuracy == pytest.approx(2 / 5)
     # Class a: gold rows among evaluated = {row0}; support 1.
     assert report.per_class["a"]["support"] == 1
     # Class b: gold rows among evaluated = {row2, row4}; support 2.
@@ -137,6 +141,7 @@ def test_evaluate_empty_predictions_all_skipped():
     report = evaluator.evaluate({})
 
     assert report.accuracy == 0.0
+    assert report.forced_choice_accuracy == 0.0
     assert report.evaluated_rows == 0
     assert report.skipped_rows == report.total_rows == 2
     assert report.per_class == {}
@@ -179,6 +184,17 @@ def test_format_report_smoke():
     assert "Per-class metrics" in text
     assert "Confusion matrix" in text
     assert "accuracy=1.0000" in text
+    assert "forced_choice_accuracy=1.0000" in text
+
+
+def test_forced_choice_accuracy_equals_accuracy_when_nothing_skipped():
+    gold_data = [_gold_row(0, "a"), _gold_row(1, "b")]
+    evaluator = StanceEvaluator(gold_data=gold_data)
+    report = evaluator.evaluate({0: "a", 1: "a"})  # row 1 wrong, none skipped
+
+    assert report.evaluated_rows == report.total_rows
+    assert report.forced_choice_accuracy == pytest.approx(report.accuracy)
+    assert report.forced_choice_accuracy == pytest.approx(0.5)
 
 
 def test_write_result_json(tmp_path):
