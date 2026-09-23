@@ -1,0 +1,329 @@
+{
+  "schema_version": "dataset_v1",
+  "generated_at": "2026-09-23T09:23:23.412115+00:00",
+  "code_commit": "1a224e92fbe086461eb63438e8e6ba9b2dd702c9",
+  "sources": {
+    "eval_db": {
+      "path": "evaluation_data/evaluations_backup20260922.sq3",
+      "sha256": "3065b05c6ad143331e0966623686b52dc99418b6119bded3b1bd0c96c42b2091"
+    },
+    "sept8_fix": {
+      "path": "evaluation_data/stance_refit_20260908fix.csv",
+      "sha256": "dfbc396d52c5a5af218167f4fd19371763803979abbef033e1c0dca38a7ae26b"
+    },
+    "exp_full_context": {
+      "path": "evaluation_data/experiments/exp_full_context.csv",
+      "sha256": "d42001e86d34903cdb77f6130b52002c6e2e04ddd8375b06eefa87305af70f03"
+    },
+    "exp_relevance_gate": {
+      "path": "evaluation_data/experiments/exp_relevance_gate.csv",
+      "sha256": "4d816517165c8984bfecc3eea25580bfeb0c286a8a3b78d6e90f90d1b7ea8737"
+    },
+    "exp_full_context_relevance_gate": {
+      "path": "evaluation_data/experiments/exp_full_context_relevance_gate.csv",
+      "sha256": "58e85b85e80bccbcbcc072d37cb04be30cb190795c6c29b6f9e0f63b7223a17e"
+    },
+    "exp_relevance_gate_v2": {
+      "path": "evaluation_data/experiments/exp_relevance_gate_v2.csv",
+      "sha256": "a1f88676b136a66db5be055a9d582c7e4f2652265c7bbd6e3ddefb96e3497201"
+    },
+    "exp_relevance_gate_v3": {
+      "path": "evaluation_data/experiments/exp_relevance_gate_v3.csv",
+      "sha256": "6716f23056447d936cb5179a5dd345612de3070f09d2b75c1b4426299eca88d4"
+    },
+    "gold_labels": {
+      "path": "gold_labels_corrected.json",
+      "sha256": "81c4c133ed99498a9dec0619c5dee2d7a97971c62d572fa55c15ee79adb1fc6f"
+    }
+  },
+  "cohort_a": {
+    "row_count": 804,
+    "primary_evaluator": "Antonie",
+    "primary_rows": 797,
+    "secondary_rows": 7,
+    "resolution_status_counts": {
+      "resolved": 713,
+      "unresolved": 89,
+      "quarantined": 2
+    },
+    "tier_counts": {
+      "A": 701,
+      "unresolved": 89,
+      "quarantined": 2,
+      "B": 12
+    },
+    "quarantine_reasons": {
+      "contradiction_correction_equals_original": 2
+    },
+    "unresolved_reasons": {
+      "negation": 28,
+      "no_unambiguous_pattern": 50,
+      "hedge": 9,
+      "multi_label_mentioned": 2
+    },
+    "duplicate_collapse": {
+      "sept8_fix": {
+        "identical_groups": [
+          {
+            "source": "sept8_fix",
+            "pair_id": "962c5807a1d0eeae",
+            "row_count": 2
+          },
+          {
+            "source": "sept8_fix",
+            "pair_id": "98de15871e50574f",
+            "row_count": 2
+          },
+          {
+            "source": "sept8_fix",
+            "pair_id": "234374c6f3968fff",
+            "row_count": 2
+          },
+          {
+            "source": "sept8_fix",
+            "pair_id": "10956a68fae75048",
+            "row_count": 2
+          },
+          {
+            "source": "sept8_fix",
+            "pair_id": "fdff4f8677be2d2c",
+            "row_count": 2
+          },
+          {
+            "source": "sept8_fix",
+            "pair_id": "6a474d9d1eddfdfe",
+            "row_count": 2
+          },
+          {
+            "source": "sept8_fix",
+            "pair_id": "08dad661ca17888d",
+            "row_count": 2
+          }
+        ],
+        "conflicting_keys": []
+      },
+      "exp_full_context": {
+        "identical_groups": [
+          {
+            "source": "exp_full_context",
+            "pair_id": "962c5807a1d0eeae",
+            "row_count": 2
+          },
+          {
+            "source": "exp_full_context",
+            "pair_id": "98de15871e50574f",
+            "row_count": 2
+          },
+          {
+            "source": "exp_full_context",
+            "pair_id": "234374c6f3968fff",
+            "row_count": 2
+          },
+          {
+            "source": "exp_full_context",
+            "pair_id": "10956a68fae75048",
+            "row_count": 2
+          },
+          {
+            "source": "exp_full_context",
+            "pair_id": "fdff4f8677be2d2c",
+            "row_count": 2
+          },
+          {
+            "source": "exp_full_context",
+            "pair_id": "6a474d9d1eddfdfe",
+            "row_count": 2
+          },
+          {
+            "source": "exp_full_context",
+            "pair_id": "08dad661ca17888d",
+            "row_count": 2
+          }
+        ],
+        "conflicting_keys": []
+      },
+      "exp_relevance_gate": {
+        "identical_groups": [
+          {
+            "source": "exp_relevance_gate",
+            "pair_id": "962c5807a1d0eeae",
+            "row_count": 2
+          },
+          {
+            "source": "exp_relevance_gate",
+            "pair_id": "98de15871e50574f",
+            "row_count": 2
+          },
+          {
+            "source": "exp_relevance_gate",
+            "pair_id": "234374c6f3968fff",
+            "row_count": 2
+          },
+          {
+            "source": "exp_relevance_gate",
+            "pair_id": "10956a68fae75048",
+            "row_count": 2
+          },
+          {
+            "source": "exp_relevance_gate",
+            "pair_id": "fdff4f8677be2d2c",
+            "row_count": 2
+          },
+          {
+            "source": "exp_relevance_gate",
+            "pair_id": "6a474d9d1eddfdfe",
+            "row_count": 2
+          },
+          {
+            "source": "exp_relevance_gate",
+            "pair_id": "08dad661ca17888d",
+            "row_count": 2
+          }
+        ],
+        "conflicting_keys": []
+      },
+      "exp_full_context_relevance_gate": {
+        "identical_groups": [
+          {
+            "source": "exp_full_context_relevance_gate",
+            "pair_id": "962c5807a1d0eeae",
+            "row_count": 2
+          },
+          {
+            "source": "exp_full_context_relevance_gate",
+            "pair_id": "98de15871e50574f",
+            "row_count": 2
+          },
+          {
+            "source": "exp_full_context_relevance_gate",
+            "pair_id": "234374c6f3968fff",
+            "row_count": 2
+          },
+          {
+            "source": "exp_full_context_relevance_gate",
+            "pair_id": "10956a68fae75048",
+            "row_count": 2
+          },
+          {
+            "source": "exp_full_context_relevance_gate",
+            "pair_id": "fdff4f8677be2d2c",
+            "row_count": 2
+          },
+          {
+            "source": "exp_full_context_relevance_gate",
+            "pair_id": "6a474d9d1eddfdfe",
+            "row_count": 2
+          },
+          {
+            "source": "exp_full_context_relevance_gate",
+            "pair_id": "08dad661ca17888d",
+            "row_count": 2
+          }
+        ],
+        "conflicting_keys": []
+      },
+      "exp_relevance_gate_v2": {
+        "identical_groups": [
+          {
+            "source": "exp_relevance_gate_v2",
+            "pair_id": "962c5807a1d0eeae",
+            "row_count": 2
+          },
+          {
+            "source": "exp_relevance_gate_v2",
+            "pair_id": "98de15871e50574f",
+            "row_count": 2
+          },
+          {
+            "source": "exp_relevance_gate_v2",
+            "pair_id": "234374c6f3968fff",
+            "row_count": 2
+          },
+          {
+            "source": "exp_relevance_gate_v2",
+            "pair_id": "10956a68fae75048",
+            "row_count": 2
+          },
+          {
+            "source": "exp_relevance_gate_v2",
+            "pair_id": "fdff4f8677be2d2c",
+            "row_count": 2
+          },
+          {
+            "source": "exp_relevance_gate_v2",
+            "pair_id": "6a474d9d1eddfdfe",
+            "row_count": 2
+          },
+          {
+            "source": "exp_relevance_gate_v2",
+            "pair_id": "08dad661ca17888d",
+            "row_count": 2
+          }
+        ],
+        "conflicting_keys": []
+      },
+      "exp_relevance_gate_v3": {
+        "identical_groups": [
+          {
+            "source": "exp_relevance_gate_v3",
+            "pair_id": "962c5807a1d0eeae",
+            "row_count": 2
+          },
+          {
+            "source": "exp_relevance_gate_v3",
+            "pair_id": "98de15871e50574f",
+            "row_count": 2
+          },
+          {
+            "source": "exp_relevance_gate_v3",
+            "pair_id": "234374c6f3968fff",
+            "row_count": 2
+          },
+          {
+            "source": "exp_relevance_gate_v3",
+            "pair_id": "10956a68fae75048",
+            "row_count": 2
+          },
+          {
+            "source": "exp_relevance_gate_v3",
+            "pair_id": "fdff4f8677be2d2c",
+            "row_count": 2
+          },
+          {
+            "source": "exp_relevance_gate_v3",
+            "pair_id": "6a474d9d1eddfdfe",
+            "row_count": 2
+          },
+          {
+            "source": "exp_relevance_gate_v3",
+            "pair_id": "08dad661ca17888d",
+            "row_count": 2
+          }
+        ],
+        "conflicting_keys": []
+      }
+    },
+    "original_prediction_disagreements": []
+  },
+  "cohort_b": {
+    "row_count": 155,
+    "resolved": 155,
+    "unresolved": 0,
+    "distinct_projects": [
+      "alt-osdorf",
+      "borsteler-chaussee",
+      "domachse",
+      "dueppelplatz",
+      "freiraumottensen",
+      "fuhlsbuettel",
+      "fussverkehr-jenfeld",
+      "nutzungsideen-innenstadt",
+      "radverkehr-mitte",
+      "wandsbek2045"
+    ]
+  },
+  "notes": [
+    "Cohort A and Cohort B are never joined against each other: stance_evaluations has no project_id column, so cross-project contribution_id collisions cannot be structurally ruled out within Cohort A either.",
+    "policy_fixtures.json entries are label_source=policy_derived, never human_gold, and never merged into pairs.parquet."
+  ]
+}

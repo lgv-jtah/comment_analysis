@@ -1,0 +1,78 @@
+[
+  {
+    "fixture_id": "policy_fixture_01",
+    "comment_text": "Super Idee!",
+    "expected": {
+      "bicycle_stands": "in_favor",
+      "remove_parking": "in_favor",
+      "plant_trees": "in_favor"
+    },
+    "basis": "general_approval",
+    "note": "General approval; all three in_favor.",
+    "label_source": "policy_derived"
+  },
+  {
+    "fixture_id": "policy_fixture_02",
+    "comment_text": "Danke, ja!",
+    "expected": {
+      "bicycle_stands": "in_favor",
+      "remove_parking": "in_favor",
+      "plant_trees": "in_favor"
+    },
+    "basis": "general_approval",
+    "note": "General approval when directly addressed to the contribution; all three in_favor.",
+    "label_source": "policy_derived"
+  },
+  {
+    "fixture_id": "policy_fixture_03",
+    "comment_text": "Endlich mehr Fahrradständer!",
+    "expected": {
+      "bicycle_stands": "in_favor",
+      "remove_parking": "neutral",
+      "plant_trees": "neutral"
+    },
+    "basis": "explicit_target",
+    "note": "Bicycle stands in_favor; other messages neutral.",
+    "label_source": "policy_derived"
+  },
+  {
+    "fixture_id": "policy_fixture_04",
+    "comment_text": "Ich unterstütze den gesamten Vorschlag, nur die Parkplätze sollten bleiben.",
+    "expected": {
+      "bicycle_stands": "in_favor",
+      "remove_parking": "against",
+      "plant_trees": "in_favor"
+    },
+    "basis": "mixed_qualified",
+    "note": "Parking removal against; bicycle stands and trees in_favor.",
+    "label_source": "policy_derived"
+  },
+  {
+    "fixture_id": "policy_fixture_05",
+    "comment_text": "Gute Idee mit den Fahrradständern, aber die Parkplätze sollten bleiben.",
+    "expected": {
+      "bicycle_stands": "in_favor",
+      "remove_parking": "against",
+      "plant_trees": "neutral"
+    },
+    "basis": "mixed_qualified",
+    "note": "Bicycle stands in_favor; parking removal against; trees neutral (scope does not extend).",
+    "label_source": "policy_derived"
+  },
+  {
+    "fixture_id": "policy_fixture_06",
+    "comment_text": "Siehe oben.",
+    "expected": null,
+    "basis": "needs_review",
+    "note": "Without resolvable context: review, do not infer approval.",
+    "label_source": "policy_derived"
+  },
+  {
+    "fixture_id": "policy_fixture_07",
+    "comment_text": "Na klar, noch mehr Autos. Großartige Idee …",
+    "expected": null,
+    "basis": "needs_review",
+    "note": "Potential sarcasm; review when unresolved.",
+    "label_source": "policy_derived"
+  }
+]
