@@ -24,6 +24,11 @@
         "system_prompt": "system.txt",
         "user_prompt": "user_prompt_relevance_gate_v2.txt"
     },
+    "relevance_gate_v3": {
+        "description": "Isolation experiment: identical to relevance_gate_v2 (AGAINST-narrowing rule + two worked examples) but with the 'prefer IN FAVOR when uncertain' tie-breaker line removed -- ties revert to NEUTRAL as in the original principle. Tests whether that single line was responsible for v2's regression.",
+        "system_prompt": "system.txt",
+        "user_prompt": "user_prompt_relevance_gate_v3.txt"
+    },
     "key_message": {
         "description": "Key message extraction",
         "system_prompt": "key_message_system.txt",
