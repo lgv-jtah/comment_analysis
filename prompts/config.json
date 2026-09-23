@@ -19,6 +19,11 @@
         "system_prompt": "system.txt",
         "user_prompt": "user_prompt_full_context_relevance_gate.txt"
     },
+    "relevance_gate_v2": {
+        "description": "Experiment: full_context_relevance_gate plus an explicit correction for the AGAINST over-prediction bug found in that experiment -- teaches the model that a comment confirming/elaborating on the problem a key message names is supporting evidence (IN FAVOR), not contradiction (AGAINST), with two new worked examples drawn from the actual regressions",
+        "system_prompt": "system.txt",
+        "user_prompt": "user_prompt_relevance_gate_v2.txt"
+    },
     "key_message": {
         "description": "Key message extraction",
         "system_prompt": "key_message_system.txt",

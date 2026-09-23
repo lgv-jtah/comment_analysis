@@ -1,0 +1,144 @@
+Klassifiziere die Haltung (Stance) des Kommentars gegenüber der Kernaussage.
+
+## Wichtigstes Prinzip
+
+NEUTRAL ist die Standardklasse.
+
+Wähle IN FAVOR oder AGAINST nur, wenn der Kommentar sich eindeutig auf die Kernaussage bezieht und eine klare Haltung dazu ausdrückt.
+
+Gleiche Wörter, ähnliches Thema oder allgemeine thematische Nähe reichen nicht für IN FAVOR.
+
+## Zweistufiges Vorgehen (WICHTIG)
+
+Du triffst zwei getrennte Entscheidungen, in dieser Reihenfolge:
+
+1. **RELEVANZ**: Bezieht sich der Kommentar inhaltlich auf dieselbe konkrete Behauptung wie die Kernaussage — nicht nur auf dasselbe Thema, sondern auf genau diese Behauptung? Antworte mit `true` oder `false`.
+2. **STANCE**: Nur falls RELEVANZ = `true`, bestimme, ob der Kommentar zustimmt (IN FAVOR) oder widerspricht (AGAINST). Falls RELEVANZ = `false`, ist die Haltung zwingend NEUTRAL — unabhängig davon, wie positiv oder negativ der Kommentar insgesamt klingt.
+
+Diese Trennung ist entscheidend: ein Kommentar kann sehr positiv oder sehr negativ klingen und trotzdem NEUTRAL zur Kernaussage sein, weil er sich auf etwas anderes bezieht (eine andere Kernaussage desselben Beitrags, den Beitrag allgemein, oder ein anderes Thema).
+
+## Kategorien
+
+* IN FAVOR: RELEVANZ = true, und der Kommentar stimmt der Kernaussage eindeutig zu, bestätigt sie, verstärkt sie, liefert ein unterstützendes Beispiel oder ergänzt sie in unterstützender Weise.
+* AGAINST: RELEVANZ = true, und der Kommentar widerspricht der Kernaussage direkt und eindeutig.
+* NEUTRAL: RELEVANZ = false (unabhängig vom Ton des Kommentars), oder RELEVANZ = true aber ohne eindeutige Zustimmung/Widerspruch.
+
+## AGAINST ist enger gemeint, als es klingt (WICHTIG — häufiger Fehler)
+
+AGAINST bedeutet: Der Kommentar bestreitet die Behauptung oder Forderung der Kernaussage selbst — er sagt z. B., dass das beschriebene Problem nicht existiert, dass die Situation anders ist als behauptet, oder er lehnt den vorgeschlagenen Schritt konkret ab.
+
+AGAINST bedeutet NICHT: Der Kommentar klingt negativ, frustriert oder beschreibt ein Problem. Viele Kernaussagen SIND selbst Beschwerden oder Problembeschreibungen (z. B. "X ist ein Problem", "Y sollte gestoppt werden", "Der Ort ist unangenehm"). Wenn ein Kommentar dieses Problem bestätigt, weiter ausführt oder mit einem eigenen Beispiel belegt, dann UNTERSTÜTZT er die Kernaussage — auch wenn der Kommentar selbst negativ klingt. Das ist IN FAVOR, nicht AGAINST.
+
+Bevor du AGAINST wählst, prüfe explizit: Widerspricht der Kommentar der Behauptung/Forderung der Kernaussage inhaltlich (z. B. "das Problem gibt es nicht", "das ist gar nicht so schlimm", "der Vorschlag ist falsch")? Oder bestätigt/ergänzt er sie nur mit weiteren (ggf. negativen) Details? Nur im ersten Fall ist AGAINST richtig.
+
+Falscher Schluss (vermeiden): "Kernaussage nennt ein Problem X. Kommentar beschreibt eine negative Erfahrung im Zusammenhang mit X. Also widerspricht der Kommentar." — Das ist falsch. Eine negative Erfahrung, die zum in der Kernaussage genannten Problem passt, bestätigt die Kernaussage.
+
+## Zusätzliche Regeln
+
+* Anderes Thema = RELEVANZ false = NEUTRAL, nicht AGAINST.
+* Thematische Nähe allein = RELEVANZ false = NEUTRAL.
+* Beschreibung eines Problems, das die Kernaussage ebenfalls beschreibt oder das die Kernaussage lösen will = bestätigt die Kernaussage = IN FAVOR, nicht AGAINST (siehe Abschnitt oben).
+* Ergänzung/Erweiterung = nur dann IN FAVOR, wenn sie die Kernaussage klar unterstützt.
+* Allgemeine Zustimmung wie "Richtig", "Genau", "Die Ansicht teile ich", "Siehe oben", oder eine unspezifische positive/negative Reaktion auf den gesamten Beitrag = RELEVANZ false = NEUTRAL. Nur wenn der Kommentar zusätzlich inhaltlich auf die spezifische Kernaussage eingeht, ist RELEVANZ true.
+* Fragen, Hinweise, Zuständigkeitsverweise oder Verfahrensvorschläge = meistens RELEVANZ false = NEUTRAL.
+* Wenn der Kommentar eine andere Kernaussage desselben Beitrags klarer trifft als die zu klassifizierende Kernaussage, dann RELEVANZ false für die zu klassifizierende Kernaussage.
+* Bei Unsicherheit über die Relevanz: RELEVANZ false, also NEUTRAL.
+* Bei Unsicherheit zwischen IN FAVOR und AGAINST bei RELEVANZ = true: bevorzuge IN FAVOR, wenn der Kommentar dasselbe Problem/denselben Wunsch wie die Kernaussage bestätigt, statt ihm zu widersprechen.
+
+## Beispiele
+
+Beispiel 1 – RELEVANZ true, IN FAVOR:
+Kernaussage: Taubenschläge sind eine Lösung.
+Kommentar: Sehr gut! Integration statt Bekämpfung. Mit betreuten Taubenschlägen könnten die Probleme für alle Seiten befriedigend gelöst werden.
+→ Der Kommentar nennt explizit "Taubenschläge" und stimmt zu. RELEVANZ true, IN FAVOR.
+
+Beispiel 2 – RELEVANZ true, AGAINST:
+Kernaussage: Fahrradverkehr ist verboten.
+Kommentar: Auf Google Street View sieht man hier bereits ein "Fahrradverkehr frei" Schild.
+→ Direkter, konkreter Widerspruch zur selben Behauptung: das Verbot existiert laut Kommentar gar nicht. RELEVANZ true, AGAINST.
+
+Beispiel 3 – RELEVANZ false, NEUTRAL:
+Kernaussage: Radfahrer gefährden Kinder.
+Kommentar: Da musst du dich an den Bezirk Hamburg-Nord wenden.
+→ Organisatorischer Hinweis, keine inhaltliche Aussage zur Kernaussage. RELEVANZ false, NEUTRAL.
+
+Beispiel 4 – RELEVANZ false, NEUTRAL:
+Kernaussage: Radwege sind nicht sicher.
+Kommentar: Die Ansicht teile ich.
+→ Reine Zustimmungsfloskel ohne inhaltlichen Bezug zur spezifischen Kernaussage. RELEVANZ false, NEUTRAL.
+
+Beispiel 5 – RELEVANZ false, NEUTRAL:
+Kernaussage: Parkplätze fehlen.
+Kommentar: Für das geringe Fahrradaufkommen sind die jetzigen Radwege ausreichend.
+→ Spricht über Radwege, nicht über fehlende Parkplätze. RELEVANZ false, NEUTRAL.
+
+Beispiel 6 – RELEVANZ false, NEUTRAL:
+Kernaussage: Die Kreuzung ist für Kinder gefährlich.
+Kommentar: An dieser Kreuzung gibt es morgens sehr viel Verkehr.
+→ Thematisch verwandt, aber keine eindeutige Aussage zur Gefährdung von Kindern. RELEVANZ false, NEUTRAL.
+
+Beispiel 7 – RELEVANZ true, IN FAVOR:
+Kernaussage: Mehr Fahrradstellplätze werden benötigt.
+Kommentar: Genau, es gibt dort viel zu wenige Abstellmöglichkeiten.
+→ "Abstellmöglichkeiten" greift die konkrete Behauptung auf und bestätigt sie. RELEVANZ true, IN FAVOR.
+
+Beispiel 8 – RELEVANZ false, NEUTRAL (andere Kernaussage betroffen):
+Kernaussage: Parkplätze für Autos fehlen.
+Weitere Kernaussagen im Beitrag: Mehr Fahrradstellplätze werden benötigt.
+Kommentar: Die Fahrräder stehen dort völlig ungeordnet, es braucht dringend geordnete Abstellmöglichkeiten.
+→ Der Kommentar bezieht sich klar auf die Fahrradstellplätze, nicht auf fehlende Autoparkplätze. Für diese Kernaussage: RELEVANZ false, NEUTRAL.
+
+Beispiel 9 – RELEVANZ false, NEUTRAL (unspezifische Gesamtreaktion):
+Kernaussage: Katastrophale Situation für Radfahrer in einer bestimmten Straße.
+Kommentar: Siehe oben.
+→ Eine unspezifische Verweis-Reaktion ohne eigenen inhaltlichen Bezug zu dieser konkreten Kernaussage. RELEVANZ false, NEUTRAL — auch wenn der referenzierte Kommentar an anderer Stelle positiv war.
+
+Beispiel 10 – RELEVANZ false, NEUTRAL (Kommentar zu unbeteiligtem Detail):
+Kernaussage: Autoverbot in einer Straße während der Rush Hour.
+Kommentar: Ist das denn eine aktuelle Wahrnehmung? Ich habe das Gefühl, dass sich durch die neue Ampelschaltung das Geschwindigkeitsniveau der Autos schon spürbar gesenkt hat.
+→ Der Kommentar diskutiert die Ampelschaltung, nicht das Autoverbot selbst. RELEVANZ false, NEUTRAL.
+
+Beispiel 11 – RELEVANZ true, IN FAVOR (Beschwerde bestätigt die Kernaussage — NICHT AGAINST):
+Kernaussage: Stoppen der weiteren Verdichtung von Wohnraum und Bodensiegelungen.
+Kommentar: Es ist ein Drama, was hier seit einigen Jahren passiert. Uns werden Grünflächen, Garagen und Stellplätze genommen und wofür? Für noch teurere Wohnungen, die man sich nicht leisten kann. Dafür kommen dann die neuen Bewohner, natürlich auch mit ihren Autos und dann fehlt es nicht nur an Grünflächen, sondern auch an Parkplätzen!
+→ Der Kommentar beschreibt ausführlich die negativen Folgen der Verdichtung — das bestätigt und untermauert die Forderung, die Verdichtung zu stoppen, es widerspricht ihr nicht. RELEVANZ true, IN FAVOR. (Falscher Schluss wäre: "klingt negativ/beschwert sich, also AGAINST" — das ist hier falsch, weil die Kernaussage selbst ein Aufruf ist, genau dieses negative Phänomen zu stoppen.)
+
+Beispiel 12 – RELEVANZ true, IN FAVOR (negative Beschreibung bestätigt eine negative Kernaussage):
+Kernaussage: Platz ist tot.
+Kommentar: Leider halten sich dort aktuell eher zwielichtige Gestalten auf, abends und im Dunkeln möchte man dort nicht alleine vorbeigehen.
+→ Der Kommentar liefert ein konkretes Beispiel dafür, warum der Platz unbelebt/unangenehm ist — das stützt die Kernaussage "Platz ist tot", statt ihr zu widersprechen. RELEVANZ true, IN FAVOR.
+
+## Vollständiger Beitragstext
+
+Der Kommentar bezieht sich auf folgenden Bürgerbeitrag. Nutze den vollständigen Text, um die RELEVANZ-Entscheidung zu treffen (z. B. ob der Kommentar sich auf einen bestimmten Absatz oder Vorschlag des Beitrags bezieht, der nicht der zu klassifizierenden Kernaussage entspricht):
+
+$contribution_text
+
+## Weitere Kernaussagen im selben Beitrag
+
+Der Kommentar stammt aus einem Beitrag, der noch weitere Kernaussagen enthalten kann. Diese lauten:
+
+$other_key_messages
+
+Falls der Kommentar inhaltlich klarer zu einer dieser weiteren Kernaussagen passt als zur unten zu klassifizierenden Kernaussage, ist RELEVANZ = false für die unten zu klassifizierende Kernaussage.
+
+## Zu klassifizierender Fall
+
+Kernaussage: $key_message
+Kommentar: $text_source
+
+Analysiere kurz, in dieser Reihenfolge:
+
+1. Was behauptet die Kernaussage?
+2. Was sagt der Kommentar tatsächlich, im Kontext des vollständigen Beitrags?
+3. RELEVANZ: Bezieht sich der Kommentar auf dieselbe konkrete Behauptung? (true/false)
+4. Falls RELEVANZ = false: Haltung ist NEUTRAL. Fertig.
+5. Falls RELEVANZ = true: Widerspricht der Kommentar der Behauptung/Forderung der Kernaussage inhaltlich (AGAINST), oder bestätigt/ergänzt er sie nur — auch mit negativen Details (IN FAVOR)? Falls unsicher: NEUTRAL.
+
+Antworte ausschließlich im JSON-Format. Keine Backticks. Das Feld "relevant" muss zuerst gesetzt werden und mit der Haltung konsistent sein (relevant=false erfordert stance="NEUTRAL").
+
+{
+"relevant": <true | false>,
+"stance": "<IN FAVOR | AGAINST | NEUTRAL>",
+"explanation": "<kurze Begründung auf Deutsch, nenne explizit die Relevanz-Entscheidung und ob der Kommentar der Kernaussage widerspricht oder sie nur mit negativen Details bestätigt>"
+}
