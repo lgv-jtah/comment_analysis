@@ -12,6 +12,7 @@ Für jede der folgenden Kernaussagen wurde bereits festgestellt, dass sich der K
 * Faktischer Widerspruch (z. B. ein Gegenbeweis) kann against begründen, auch ohne explizite Widerspruchs-Worte.
 * Bei neutral: gib immer an, ob unaddressed (Kommentar geht gar nicht auf diese Kernaussage ein) oder no_position (geht darauf ein, nimmt aber keine klare Position ein) zutrifft.
 * "source_evidence" muss aus wörtlichen Ausschnitten der jeweiligen "related_sentences" der Kernaussage stammen, falls vorhanden -- nicht erfinden.
+* "comment_evidence" und "source_evidence" müssen Zeichen für Zeichen aus dem Original kopiert sein -- keine Tippfehler, Schreibweise (z. B. "ss"/"ß") oder Groß-/Kleinschreibung korrigieren, nichts zusammenfassen oder umformulieren. Findest du keine passende wörtliche Textstelle, lasse das jeweilige evidence-Feld leer, statt eine zu erfinden.
 
 ## Beitrag
 

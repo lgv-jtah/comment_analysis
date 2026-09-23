@@ -202,28 +202,96 @@ decisive fix.** A separate, untouched failure mode --
 rejections) -- is now proportionally a larger share of remaining review
 routing than before, and hasn't been investigated yet.
 
+## Evidence-grounding validation cluster (`evidence_not_substring_of_comment` etc.)
+
+Root-caused by reproducing the 4 comments that triggered it live
+(`policy.py`'s `_validate_scope`/`_validate_stance` do an exact Python
+`in` substring check between the LLM's claimed quote and the actual
+comment text -- see debug reproduction, not committed, run via a
+scratchpad script). Found two genuinely different failure patterns among
+5 mismatches from those 4 comments:
+
+1. **Whitespace-only mismatch (1 of 5).** The source comment was
+   `"Mit freundlichen Grüßen\nHans-Hinrich Biel\n\nRadfahrer..."`; the
+   model quoted it back with newlines folded to spaces:
+   `"Mit freundlichen Grüßen Hans-Hinrich Biel Radfahrer..."`. Same text,
+   reformatted -- not a fabricated quote, but the exact-substring check
+   rejected it anyway.
+2. **Real content mismatch (4 of 5).** The model auto-corrected a citizen's
+   typo/spelling while "quoting" (`"STrasse"` -> `"Straße"`), and in two
+   cases produced a paraphrase/summary or a split reconstruction that
+   simply isn't present verbatim anywhere in the comment (e.g. quoting
+   "Leider sind einige Autofahrer ihres Führerscheins unwürdig." for a
+   comment that never says that -- a genuine hallucinated "quote", not a
+   formatting artifact).
+
+**Change, code** (`policy.py`): added `_normalize_whitespace()` (collapse
+any whitespace run to a single space) and applied it to both sides of
+every evidence-substring/set-membership check in `_validate_scope`,
+`_validate_stance`, and `OneCallPolicyEngineV2._validate`. This recovers
+case 1 without weakening the grounding guarantee -- it is still an exact
+match after normalization, so case 2's fabrications and corrections
+correctly continue to fail. 4 new regression tests added
+(`tests/test_policy.py`): two confirm whitespace-only differences are now
+accepted, two (one per engine) confirm a genuine word-level change (the
+`STrasse`/`Straße` case) is still rejected.
+
+**Change, prompts**: strengthened the "literal quote" instruction in all
+three evidence-quoting prompts (`scope_attribution_user.txt`,
+`per_target_stance_user.txt`, `stance_v2_one_call_user.txt`) to explicitly
+say: copy character-for-character, do not correct typos/spelling/casing,
+do not paraphrase, and leave the evidence field empty rather than invent
+one. This cannot fix case-2-style fabrication outright (a
+determined-enough model can still ignore instructions), but should reduce
+its rate; the exact-substring validation remains the actual safety net
+regardless.
+
+**Re-ran the identical two-stage/mistral-nemo/fold-0 configuration again**
+(`dataset/experiments/screening_fold0_mistral-nemo_two_stage_v3groundingfix.parquet`),
+cumulative with the `missing_context` prompt change:
+
+| | forced_choice_accuracy | accepted_accuracy | labelled_coverage | review_rate | review rows |
+|---|---|---|---|---|---|
+| v1: original | 0.429 (51/119) | 0.560 (51/91) | 0.765 | 0.254 | 35 |
+| v2: + missing_context prompt fix | 0.445 (53/119) | 0.552 (53/96) | 0.807 | 0.188 | 26 |
+| v3: + grounding whitespace fix + stronger quote instructions | 0.454 (54/119) | 0.551 (54/98) | 0.824 | 0.152 | 21 |
+
+Cumulative v1->v3: forced_choice_accuracy +2.5pp, review_rate cut from
+25.4% to 15.2% (35 -> 21 review rows), coverage up from 76.5% to 82.4%.
+`accepted_accuracy` stayed essentially flat across all three versions
+(0.560 -> 0.551) -- both fixes convert *declined* pairs (automatically
+wrong under forced-choice scoring) into *forced guesses* that are, on
+net, roughly coin-flip accurate, not a quality improvement on the
+predictions themselves. **Directionally correct, cumulatively real, but
+still not close to closing the gap** with the historical baseline's
+0.748.
+
 ## Status
 
-**Still not decided which direction to pursue.** Three independent
-findings all point the same way: the new policy-v2 architecture, across
-every variant, every model, and this first prompt iteration, remains well
-below the historical baseline (best result so far: gptoss-120b verifier
-variant at 0.602 accepted_accuracy vs. 0.748 historical). Remaining
-untried levers, in rough order of expected leverage:
-- Investigate the `evidence_not_substring_of_comment` /
-  `invalid_scope_output` / `invalid_stance_output` review-routing cluster
-  (~16 of 26 remaining review rows in the latest run) -- unlike
-  `missing_context`, this hasn't been root-caused at all yet. It may be a
-  genuine evidence-grounding strictness issue, a prompt-formatting issue,
-  or something else.
+**Still not decided which direction to pursue.** Four independent
+findings now point the same way: the new policy-v2 architecture, across
+every variant, every model, and two rounds of prompt/validation fixes,
+remains well below the historical baseline (best result so far:
+gptoss-120b verifier variant at 0.602 accepted_accuracy vs. 0.748
+historical). The two issues investigated so far (`missing_context`
+over-triggering, evidence-grounding rejections) were real but each only
+worth ~1-2pp of forced_choice_accuracy -- neither was the dominant
+driver. What's left unexamined:
+- **accepted_accuracy itself is flat at ~0.55-0.57 regardless of which
+  review-routing fix is applied** -- this means the core problem isn't
+  "too many pairs get declined," it's that a large fraction of the pairs
+  the pipeline *does* confidently answer are simply wrong. Neither fix so
+  far touched that. This needs its own investigation: pull the *accepted*
+  wrong predictions (not the review-routed ones) and read them by hand,
+  the same way the review-routing clusters were read.
 - Decide how to report the general-approval/historical-label divergence
   in the final report: as brief section 3 requires, report both numbers
   (against-historical and policy-compliant) rather than picking one --
   this alone would recover a meaningful chunk of the apparent gap without
   any further code/prompt change, since some of what's currently scored
   "wrong" is the policy correctly doing what it was specified to do.
-- Only after the evidence-grounding cluster is understood, re-run the
-  fold-0 screening comparison to confirm cumulative improvement, then
-  proceed to the full-cohort comparison and (separately, cross-repo)
-  provisioning Llama 3.3 70B / Mistral Small 24B on the LiteLLM proxy if
-  a broader model sweep is still wanted at that point.
+- Once accepted-but-wrong predictions are understood, re-run the fold-0
+  screening comparison to confirm cumulative improvement, then proceed to
+  the full-cohort comparison and (separately, cross-repo) provisioning
+  Llama 3.3 70B / Mistral Small 24B on the LiteLLM proxy if a broader
+  model sweep is still wanted at that point.

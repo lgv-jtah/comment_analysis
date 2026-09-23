@@ -43,6 +43,19 @@ PairStatus = Literal["accepted", "needs_review", "failed"]
 DEFAULT_PROMPT_CONFIG_PATH = "./prompts/config.json"
 
 
+def _normalize_whitespace(text: str) -> str:
+    """Collapses any run of whitespace (including newlines) to a single space.
+
+    Used only for the evidence-substring grounding check, never for
+    display/storage. A model quoting a multi-line comment often reproduces
+    it with newlines folded to spaces (e.g. "a\\nb" -> "a b"); that is the
+    same text, not a fabricated quote, so the grounding check should not
+    reject it. It still rejects anything that differs by more than
+    whitespace (typo "corrections", paraphrases, invented text).
+    """
+    return " ".join(text.split())
+
+
 @dataclass
 class PairOutput:
     """One (comment, key message) result, matching the brief section 7 contract.
@@ -297,8 +310,9 @@ class StancePolicyEngineV2:
         for kid in scope.affected_key_message_ids:
             if kid not in valid_ids:
                 errors.append(f"unknown_key_message_id:{kid}")
+        normalized_comment = _normalize_whitespace(context.comment_text)
         for evidence in scope.comment_evidence:
-            if evidence not in context.comment_text:
+            if _normalize_whitespace(evidence) not in normalized_comment:
                 errors.append("evidence_not_substring_of_comment")
         return errors
 
@@ -308,16 +322,18 @@ class StancePolicyEngineV2:
     ) -> list[str]:
         errors = []
         related_by_id = {km.key_message_id: set(km.related_sentences) for km in context.key_messages}
+        normalized_comment = _normalize_whitespace(context.comment_text)
         for target in result.targets:
             if target.key_message_id not in allowed_ids:
                 errors.append(f"unknown_key_message_id:{target.key_message_id}")
                 continue
             for evidence in target.comment_evidence:
-                if evidence not in context.comment_text:
+                if _normalize_whitespace(evidence) not in normalized_comment:
                     errors.append("evidence_not_substring_of_comment")
             related = related_by_id.get(target.key_message_id, set())
+            normalized_related = {_normalize_whitespace(s) for s in related}
             for evidence in target.source_evidence:
-                if evidence not in related:
+                if _normalize_whitespace(evidence) not in normalized_related:
                     errors.append("source_evidence_not_in_related_sentences")
             if target.stance == StanceLabelV2.NEUTRAL and target.neutral_basis is None:
                 errors.append("neutral_missing_basis")
@@ -503,13 +519,14 @@ class OneCallPolicyEngineV2:
         errors: list[str] = []
         valid_ids = {km.key_message_id for km in context.key_messages}
         seen_ids: set[str] = set()
+        normalized_comment = _normalize_whitespace(context.comment_text)
         for target in result.targets:
             if target.key_message_id not in valid_ids:
                 errors.append(f"unknown_key_message_id:{target.key_message_id}")
                 continue
             seen_ids.add(target.key_message_id)
             for evidence in target.comment_evidence:
-                if evidence not in context.comment_text:
+                if _normalize_whitespace(evidence) not in normalized_comment:
                     errors.append("evidence_not_substring_of_comment")
         missing = valid_ids - seen_ids
         if missing:

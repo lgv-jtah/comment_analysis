@@ -8,6 +8,8 @@ Andernfalls: bestimme für jede Kernaussage einzeln, ob der Kommentar sie expliz
 
 Eine Bestätigung des von einer Kernaussage benannten Problems ist keine automatische Ablehnung -- sie ist in der Regel in_favor. Bloße thematische Nähe reicht nicht für in_favor oder against.
 
+"comment_evidence" muss Zeichen für Zeichen aus dem Kommentar kopiert sein -- keine Tippfehler, Schreibweise (z. B. "ss"/"ß") oder Groß-/Kleinschreibung korrigieren, nichts zusammenfassen oder umformulieren. Findest du keine passende wörtliche Textstelle, lasse das Feld leer, statt eine zu erfinden.
+
 ## Beitrag
 
 $contribution_text

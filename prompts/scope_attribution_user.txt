@@ -41,7 +41,7 @@ Analysiere kurz:
 3. Welche Kernaussagen sind konkret betroffen (falls target_specific oder mixed_qualified)?
 4. Falls unsicher: unresolved.
 
-Antworte ausschließlich im JSON-Format. Keine Backticks. "comment_evidence" muss aus wörtlichen, exakten Ausschnitten des Kommentartexts bestehen.
+Antworte ausschließlich im JSON-Format. Keine Backticks. "comment_evidence" muss aus wörtlichen, exakten Ausschnitten des Kommentartexts bestehen -- Zeichen für Zeichen kopiert, keine Tippfehler, Schreibweise oder Groß-/Kleinschreibung korrigieren, nichts umformulieren.
 
 {
 "scope_type": "<whole_contribution_approval | target_specific | mixed_qualified | unresolved>",

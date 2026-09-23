@@ -365,6 +365,42 @@ def test_scope_evidence_not_substring_of_comment_routes_to_review(monkeypatch):
     assert any("evidence_not_substring_of_comment" in r.review_reasons for r in results)
 
 
+def test_scope_evidence_with_normalized_whitespace_is_accepted(monkeypatch):
+    """A multi-line comment quoted with newlines folded to spaces is the
+    same text, not a fabricated quote -- see docs/phase5_screening_results.md's
+    evidence-grounding investigation."""
+    context = _context(comment_text="Mit freundlichen Grüßen\nHans Biel\n\nRadfahrer")
+
+    async def call_model(*, response_schema, **kwargs):
+        return _scope_response(
+            scope_type="whole_contribution_approval",
+            comment_evidence=["Mit freundlichen Grüßen Hans Biel Radfahrer"],
+        )
+
+    engine = _make_engine(monkeypatch, call_model)
+    results = _run(engine, context)
+
+    assert all(r.status == "accepted" for r in results)
+
+
+def test_scope_evidence_with_real_word_change_still_rejected(monkeypatch):
+    """Whitespace-only tolerance must not mask an actual word substitution
+    (e.g. the model "correcting" the source's spelling/casing)."""
+    context = _context(comment_text="Das stimmt, hier auf die STrasse")
+
+    async def call_model(*, response_schema, **kwargs):
+        return _scope_response(
+            scope_type="whole_contribution_approval",
+            comment_evidence=["Das stimmt, hier auf die Straße"],
+        )
+
+    engine = _make_engine(monkeypatch, call_model)
+    results = _run(engine, context)
+
+    assert all(r.status == "needs_review" for r in results)
+    assert any("evidence_not_substring_of_comment" in r.review_reasons for r in results)
+
+
 def test_malformed_scope_output_fails_validation_and_routes_to_review(monkeypatch):
     async def call_model(*, response_schema, **kwargs):
         # Missing the required "scope_type" field entirely -> Pydantic
@@ -431,6 +467,33 @@ def test_stance_comment_evidence_not_substring_routes_to_review(monkeypatch):
 
     assert by_id[km1_id].status == "needs_review"
     assert "evidence_not_substring_of_comment" in by_id[km1_id].review_reasons
+
+
+def test_stance_comment_evidence_with_normalized_whitespace_is_accepted(monkeypatch):
+    context = _context(comment_text="Ich finde\ndas eine gute Idee")
+    km1_id = context.key_messages[0].key_message_id
+
+    async def call_model(*, response_schema, **kwargs):
+        if response_schema.__name__ == "ScopeAttributionResult":
+            return _scope_response(scope_type="target_specific", affected_key_message_ids=[km1_id])
+        return _stance_response(
+            [
+                {
+                    "key_message_id": km1_id,
+                    "stance": "in_favor",
+                    "neutral_basis": None,
+                    "comment_evidence": ["Ich finde das eine gute Idee"],
+                    "source_evidence": [],
+                    "explanation": "",
+                }
+            ]
+        )
+
+    engine = _make_engine(monkeypatch, call_model)
+    results = _run(engine, context)
+    by_id = {r.key_message_id: r for r in results}
+
+    assert by_id[km1_id].status == "accepted"
 
 
 def test_stance_call_failure_marks_addressed_targets_failed(monkeypatch):
@@ -676,6 +739,24 @@ def test_one_call_evidence_not_substring_routes_to_review(monkeypatch):
 
     assert all(r.status == "needs_review" for r in results)
     assert any("evidence_not_substring_of_comment" in r.review_reasons for r in results)
+
+
+def test_one_call_evidence_with_normalized_whitespace_is_accepted(monkeypatch):
+    context = _context(comment_text="Ich finde\ndas eine gute Idee")
+    km1_id, km2_id = [km.key_message_id for km in context.key_messages]
+
+    async def call_model(*, response_schema, **kwargs):
+        return _one_call_response(
+            [
+                {"key_message_id": km1_id, "stance": "in_favor", "basis": "explicit_target", "comment_evidence": ["Ich finde das eine gute Idee"], "explanation": ""},
+                {"key_message_id": km2_id, "stance": "neutral", "basis": "unaddressed", "comment_evidence": [], "explanation": ""},
+            ]
+        )
+
+    engine = _make_one_call_engine(monkeypatch, call_model)
+    results = _run(engine, context)
+
+    assert all(r.status == "accepted" for r in results)
 
 
 def test_one_call_failed_call_marks_everything_failed(monkeypatch):
