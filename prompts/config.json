@@ -4,6 +4,21 @@
         "system_prompt": "system.txt",
         "user_prompt": "user_prompt.txt"
     },
+    "full_context": {
+        "description": "Experiment: base prompt + full contribution text ($contribution_text) alongside the sibling-key-message list, so the model can ground relevance in the actual source text instead of just KM strings",
+        "system_prompt": "system.txt",
+        "user_prompt": "user_prompt_full_context.txt"
+    },
+    "relevance_gate": {
+        "description": "Experiment: base prompt restructured into an explicit two-step decision (relevant: true/false, then stance), with relevant=false forcing stance=NEUTRAL, plus two new few-shot examples mined from real annotated failures",
+        "system_prompt": "system.txt",
+        "user_prompt": "user_prompt_relevance_gate.txt"
+    },
+    "full_context_relevance_gate": {
+        "description": "Experiment: combines full_context and relevance_gate -- full contribution text plus the explicit relevance-first decision structure",
+        "system_prompt": "system.txt",
+        "user_prompt": "user_prompt_full_context_relevance_gate.txt"
+    },
     "key_message": {
         "description": "Key message extraction",
         "system_prompt": "key_message_system.txt",
