@@ -1,0 +1,35 @@
+Analysiere den folgenden Kommentar zu einem Beteiligungsbeitrag und bestimme für JEDE Kernaussage des Beitrags die Haltung des Kommentars.
+
+## Grundprinzip
+
+Prüfe zuerst, ob der Kommentar eine uneingeschränkte allgemeine Zustimmung zum GESAMTEN Beitrag ausdrückt (z. B. "Super Idee!"). Falls ja: alle Kernaussagen erhalten stance=in_favor, basis=general_approval.
+
+Andernfalls: bestimme für jede Kernaussage einzeln, ob der Kommentar sie explizit adressiert (basis=explicit_target, stance=in_favor oder against je nach Zustimmung/Widerspruch) oder nicht (basis=unaddressed, stance=neutral), oder sie zwar berührt aber keine Position bezieht (basis=no_position, stance=neutral).
+
+Eine Bestätigung des von einer Kernaussage benannten Problems ist keine automatische Ablehnung -- sie ist in der Regel in_favor. Bloße thematische Nähe reicht nicht für in_favor oder against.
+
+## Beitrag
+
+$contribution_text
+
+## Kernaussagen dieses Beitrags
+
+$key_messages_block
+
+## Kommentar
+
+$comment_text
+
+Antworte ausschließlich im JSON-Format. Keine Backticks. Für jede oben aufgeführte Kernaussage genau ein Eintrag.
+
+{
+"targets": [
+  {
+    "key_message_id": "<id>",
+    "stance": "<in_favor | against | neutral>",
+    "basis": "<general_approval | explicit_target | unaddressed | no_position>",
+    "comment_evidence": ["<wörtliches Zitat>"],
+    "explanation": "<kurze Begründung auf Deutsch>"
+  }
+]
+}

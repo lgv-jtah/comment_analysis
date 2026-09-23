@@ -1,0 +1,53 @@
+Analysiere, worauf sich der folgende Kommentar bezieht: auf den gesamten Beitrag, auf bestimmte Kernaussagen, auf eine Mischung aus beidem, oder ist es unklar.
+
+## Kategorien (scope_type)
+
+* whole_contribution_approval: Der Kommentar drückt eine uneingeschränkte, allgemeine Zustimmung zum GESAMTEN Beitrag aus (z. B. "Super Idee!", "Danke, ja!" als direkte Antwort auf den Beitrag). Kurze Länge oder das Wort "gut" allein reichen NICHT aus, wenn der Kommentar sich erkennbar nur auf einen Teilaspekt bezieht.
+* target_specific: Der Kommentar bezieht sich klar auf eine oder mehrere bestimmte Kernaussagen, nicht auf den gesamten Beitrag.
+* mixed_qualified: Der Kommentar drückt eine qualifizierte oder gemischte Zustimmung aus -- z. B. generelle Zustimmung mit einer expliziten Ausnahme, oder Zustimmung zu einem Teil kombiniert mit Widerspruch zu einem anderen.
+* unresolved: Es ist nicht sicher feststellbar, worauf sich der Kommentar bezieht (z. B. unauflösbarer Verweis wie "Siehe oben" ohne Kontext, vermuteter Sarkasmus, fehlender notwendiger Kontext).
+
+## Bei mixed_qualified: general_support_extends_to_unaddressed
+
+Wenn scope_type = mixed_qualified: Entscheide zusätzlich, ob die allgemeine Zustimmung des Kommentars auch auf die Kernaussagen ausstrahlt, die NICHT explizit erwähnt werden.
+
+* true: z. B. "Ich unterstütze den gesamten Vorschlag, nur die Parkplätze sollten bleiben." -- die nicht erwähnten Kernaussagen sind mit gemeint (in_favor).
+* false/null: z. B. "Gute Idee mit den Fahrradständern, aber die Parkplätze sollten bleiben." -- die Zustimmung bezieht sich nur auf die explizit genannte Kernaussage, nicht erwähnte Kernaussagen bleiben neutral.
+
+## Wichtige Prinzipien
+
+* Ein direkter Reply-Kommentar auf einen anderen Kommentar ist NICHT automatisch eine Zustimmung zum ursprünglichen Beitrag.
+* Bestätigung eines Problems ist nicht automatisch Zustimmung zu einer bestimmten Lösung.
+* Bloße thematische Nähe oder gleiche Wörter begründen keinen Bezug.
+* Bei Unsicherheit über Sarkasmus, unauflösbare Verweise, oder fehlenden Kontext: unresolved, mit passendem uncertainty_flag (z. B. "suspected_sarcasm", "unresolved_reply_reference", "missing_context").
+* Bei Unsicherheit generell: unresolved.
+
+## Beitrag
+
+$contribution_text
+
+## Kernaussagen dieses Beitrags
+
+$key_messages_block
+
+## Zu analysierender Kommentar
+
+$comment_text
+
+Analysiere kurz:
+
+1. Bezieht sich der Kommentar auf den gesamten Beitrag oder auf bestimmte Kernaussagen?
+2. Ist die Zustimmung/Ablehnung uneingeschränkt oder qualifiziert?
+3. Welche Kernaussagen sind konkret betroffen (falls target_specific oder mixed_qualified)?
+4. Falls unsicher: unresolved.
+
+Antworte ausschließlich im JSON-Format. Keine Backticks. "comment_evidence" muss aus wörtlichen, exakten Ausschnitten des Kommentartexts bestehen.
+
+{
+"scope_type": "<whole_contribution_approval | target_specific | mixed_qualified | unresolved>",
+"affected_key_message_ids": ["<id>", "..."],
+"general_support_extends_to_unaddressed": <true | false | null>,
+"comment_evidence": ["<wörtliches Zitat>"],
+"uncertainty_flags": ["<flag>", "..."],
+"explanation": "<kurze Begründung auf Deutsch>"
+}

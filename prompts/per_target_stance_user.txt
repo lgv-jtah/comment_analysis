@@ -1,0 +1,41 @@
+Für jede der folgenden Kernaussagen wurde bereits festgestellt, dass sich der Kommentar auf sie bezieht. Bestimme jetzt für JEDE davon die Haltung (Stance).
+
+## Kategorien
+
+* in_favor: Der Kommentar stimmt dieser konkreten Kernaussage zu, bestätigt sie, oder unterstützt sie inhaltlich -- auch wenn der Kommentar selbst negativ oder frustriert klingt, solange er dieselbe Behauptung/Forderung bestätigt (z. B. eine Beschwerde, die genau das Problem bestätigt, das die Kernaussage benennt).
+* against: Der Kommentar widerspricht der konkreten Behauptung oder Forderung dieser Kernaussage direkt -- er bestreitet sie, sagt sie treffe nicht zu, oder lehnt den vorgeschlagenen Schritt ab.
+* neutral: Der Kommentar äußert zu dieser Kernaussage keine erkennbare Position, obwohl er sie berührt (no_position); oder er behandelt sie tatsächlich nicht, wurde ihr aber zur Prüfung zugeordnet (unaddressed).
+
+## Wichtig
+
+* Eine Bestätigung des in der Kernaussage genannten Problems ist KEINE automatische Ablehnung -- sie ist in der Regel in_favor.
+* Faktischer Widerspruch (z. B. ein Gegenbeweis) kann against begründen, auch ohne explizite Widerspruchs-Worte.
+* Bei neutral: gib immer an, ob unaddressed (Kommentar geht gar nicht auf diese Kernaussage ein) oder no_position (geht darauf ein, nimmt aber keine klare Position ein) zutrifft.
+* "source_evidence" muss aus wörtlichen Ausschnitten der jeweiligen "related_sentences" der Kernaussage stammen, falls vorhanden -- nicht erfinden.
+
+## Beitrag
+
+$contribution_text
+
+## Zu bewertende Kernaussagen
+
+$key_messages_block
+
+## Kommentar
+
+$comment_text
+
+Antworte ausschließlich im JSON-Format. Keine Backticks. Für jede oben aufgeführte Kernaussage genau ein Eintrag.
+
+{
+"targets": [
+  {
+    "key_message_id": "<id>",
+    "stance": "<in_favor | against | neutral>",
+    "neutral_basis": "<unaddressed | no_position | null>",
+    "comment_evidence": ["<wörtliches Zitat aus dem Kommentar>"],
+    "source_evidence": ["<wörtliches Zitat aus related_sentences, falls zutreffend>"],
+    "explanation": "<kurze Begründung auf Deutsch>"
+  }
+]
+}

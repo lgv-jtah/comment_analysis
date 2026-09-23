@@ -29,6 +29,27 @@
         "system_prompt": "system.txt",
         "user_prompt": "user_prompt_relevance_gate_v3.txt"
     },
+    "scope_attribution": {
+        "description": "Policy v2 stage 1: scope/attribution decision (whole_contribution_approval / target_specific / mixed_qualified / unresolved). Response schema: policy_schemas.ScopeAttributionResult.",
+        "system_prompt": "scope_attribution_system.txt",
+        "user_prompt": "scope_attribution_user.txt",
+        "policy_version": "v2",
+        "schema_version": "scope_attribution_v1"
+    },
+    "per_target_stance": {
+        "description": "Policy v2 stage 2: batched per-key-message stance for the targets stage 1 marked as affected. Response schema: policy_schemas.PerTargetStanceResult.",
+        "system_prompt": "per_target_stance_system.txt",
+        "user_prompt": "per_target_stance_user.txt",
+        "policy_version": "v2",
+        "schema_version": "per_target_stance_v1"
+    },
+    "stance_v2_one_call": {
+        "description": "Policy v2 one-call comparison variant: scope and per-target stance decided in a single call, for the brief's experiment-matrix comparison against the two-stage pipeline. Response schema: policy_schemas.StanceV2OneCallResult.",
+        "system_prompt": "stance_v2_one_call_system.txt",
+        "user_prompt": "stance_v2_one_call_user.txt",
+        "policy_version": "v2",
+        "schema_version": "stance_v2_one_call_v1"
+    },
     "key_message": {
         "description": "Key message extraction",
         "system_prompt": "key_message_system.txt",
