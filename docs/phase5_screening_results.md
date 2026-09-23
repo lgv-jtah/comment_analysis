@@ -1,4 +1,4 @@
-# Phase 5 screening results: policy-v2 vs. historical baseline (mistral-nemo)
+# Phase 5 screening results: policy-v2 vs. historical baseline
 
 STANCE_PIPELINE_IMPLEMENTATION_BRIEF.md section 10, step 3: compare the
 historical saved baseline, the policy-v2 one-call classifier, the policy-v2
@@ -100,16 +100,61 @@ After controlling for the first, a real accuracy shortfall remains
 (0.57-0.66 vs. 0.748), which needs further investigation before this
 architecture can be called competitive with the existing system.
 
+## Cross-model comparison (brief section 10, step 4)
+
+Same fold-0 screening subset, verifier-enabled two-stage configuration
+held identical, only the model swapped:
+
+| Model | forced_choice_accuracy | accepted_accuracy | labelled_coverage | review_rate | per-class accepted_accuracy (against / in_favor / neutral) |
+|---|---|---|---|---|---|
+| mistral-nemo | 0.454 (54/119) | 0.574 (54/94) | 0.790 | 0.232 | 0.400 / 0.690 / 0.545 |
+| llama-31-405b-fp8 | **failed -- see below** | -- | -- | -- | -- |
+| gptoss-120b | 0.471 (56/119) | 0.602 (56/93) | 0.782 | 0.210 | 0.600 / 0.640 / 0.586 |
+
+`gptoss-120b` is marginally stronger than `mistral-nemo` on this subset
+(accepted_accuracy 0.602 vs. 0.574), most notably on the `against` class
+(0.600 vs. 0.400, the class the historical baseline itself struggles with
+most). Neither reaches the historical baseline's 0.748.
+
+**`llama-31-405b-fp8` run failed completely** (138/138 pairs `status=failed`,
+0 accepted) -- not a policy-engine bug. Direct API check confirms IONOS has
+fully decommissioned `meta-llama/Meta-Llama-3.1-405B-Instruct-FP8`:
+
+```
+404 MODEL_NOT_SUPPORTED: Model 'meta-llama/Meta-Llama-3.1-405B-Instruct-FP8'
+is not supported for chat completions. Supported models are:
+"Qwen/Qwen3-Coder-Next", "Qwen/Qwen3.5-397B-A17B", "Qwen/Qwen3.5-9B",
+"Qwen/Qwen3.8-27B", "lightonai/LightOnOCR-2-1B",
+"meta-llama/Llama-3.3-70B-Instruct", "meta-llama/Meta-Llama-3.1-8B-Instruct",
+"mistralai/Mistral-Nemo-Instruct-2407", "mistralai/Mistral-Small-24B-Instruct",
+"openai/gpt-oss-120b"
+```
+
+This resolves implementation-plan open risk #6: IONOS's current catalog
+*does* include both of the brief's originally-suggested models --
+**Llama 3.3 70B** (`meta-llama/Llama-3.3-70B-Instruct`) and **Mistral
+Small 24B** (`mistralai/Mistral-Small-24B-Instruct`) -- confirmed live
+directly against IONOS, not just inferred from the brief. Neither is
+wired into the local LiteLLM proxy's `config.yaml` yet (a separate repo,
+`/home/julien/projects/LiteLLM/`) under a `model_name` alias this
+pipeline can call. Per the plan's stated fallback ("comparing only the
+already-configured models if new provisioning isn't feasible"), the
+`llama-31-405b-fp8` slot in the comparison was simply dropped rather than
+retried, and `gptoss-120b` stands as the second data point above. The
+failed run's predictions (all-`failed` rows) are kept at
+`dataset/experiments/screening_fold0_llama-31-405b-fp8_two_stage_verifier.parquet`
+as a record of the failure, not deleted.
+
 ## Status
 
-**Not yet decided which direction to pursue.** Before spending further
-IONOS budget on the section 10 step 4 cross-model comparison
-(llama-31-405b-fp8, gptoss-120b) -- which would repeat this same
-screening-subset methodology per model, another 15-25 min of live calls
-each -- this result needs to be discussed, since running the same
-setup on more models won't resolve either root cause above (both are
-prompt/architecture/data issues, not model-choice issues). Candidate next
-steps, not yet started:
+**Not yet decided which direction to pursue.** Two independent findings
+both point the same way: the new policy-v2 architecture, across every
+variant and every model tried so far, underperforms the historical
+baseline on this screening subset, for reasons that are prompt/data
+issues rather than model-choice issues (see root-cause breakdown above).
+Adding Llama 3.3 70B / Mistral Small 24B to the comparison (via a
+LiteLLM config change) would not resolve either root cause -- it's a
+separate, lower-priority axis. Candidate next steps, not yet started:
 - Tighten the scope-attribution prompt's `missing_context` trigger
   (currently fires on ordinary short replies with no parent-context
   signal at all, which may be over-conservative given
@@ -119,5 +164,7 @@ steps, not yet started:
   in the final report: as brief section 3 requires, report both numbers
   (against-historical and policy-compliant) rather than picking one.
 - Only after one of the above is addressed, re-run the fold-0 screening
-  comparison to confirm improvement, then proceed to the full-cohort and
-  cross-model comparisons.
+  comparison to confirm improvement, then proceed to the full-cohort
+  comparison and (separately, cross-repo) provisioning Llama 3.3 70B /
+  Mistral Small 24B on the LiteLLM proxy if a broader model sweep is
+  still wanted at that point.
