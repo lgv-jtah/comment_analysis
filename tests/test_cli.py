@@ -501,3 +501,59 @@ def test_historical_baseline_command_writes_predictions_and_scores_them(tmp_path
     out = capsys.readouterr().out
     assert "Wrote 2 historical-baseline predictions" in out
     assert "Overall" in out
+
+
+# ---------------------------------------------------------------------------
+# post-fix-baseline
+# ---------------------------------------------------------------------------
+
+
+def test_post_fix_baseline_command_excludes_uncovered_rows_and_scores(tmp_path, capsys):
+    reference_path = tmp_path / "pairs.parquet"
+    pd.DataFrame(
+        [
+            {
+                "pair_id": "p1",
+                "contribution_id": 1,
+                "key_message": "km1",
+                "comment_text": "c1",
+                "resolution_status": "resolved",
+                "reference_label": "in_favor",
+                "established_original_label": "in_favor",
+                "post_fix_original_label": "in_favor",
+            },
+            {
+                "pair_id": "p2",
+                "contribution_id": 1,
+                "key_message": "km2",
+                "comment_text": "c2",
+                "resolution_status": "resolved",
+                "reference_label": "neutral",
+                "established_original_label": "against",
+                "post_fix_original_label": None,  # not covered by stance_refit_20260908fix.csv
+            },
+        ]
+    ).to_parquet(reference_path)
+
+    output_path = tmp_path / "post_fix_predictions.parquet"
+
+    cli.main(
+        [
+            "post-fix-baseline",
+            "--output",
+            str(output_path),
+            "--reference",
+            str(reference_path),
+            "--folds",
+            str(tmp_path / "no_such_folds.json"),
+        ]
+    )
+
+    assert output_path.exists()
+    written = pd.read_parquet(output_path)
+    assert len(written) == 1
+    assert written.iloc[0]["pair_id"] == "p1"
+
+    out = capsys.readouterr().out
+    assert "Wrote 1 post-fix-baseline predictions" in out
+    assert "Overall" in out

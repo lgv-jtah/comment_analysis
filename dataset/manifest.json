@@ -1,7 +1,7 @@
 {
   "schema_version": "dataset_v1",
-  "generated_at": "2026-09-23T09:23:23.412115+00:00",
-  "code_commit": "1a224e92fbe086461eb63438e8e6ba9b2dd702c9",
+  "generated_at": "2026-09-24T09:54:10.265618+00:00",
+  "code_commit": "ef342e0ac4fa98e304627a579f89b8bd8ce410ca",
   "sources": {
     "eval_db": {
       "path": "evaluation_data/evaluations_backup20260922.sq3",
@@ -303,7 +303,11 @@
         "conflicting_keys": []
       }
     },
-    "original_prediction_disagreements": []
+    "original_prediction_disagreements": [],
+    "post_fix_coverage": {
+      "resolved_rows_with_post_fix_label": 713,
+      "note": "post_fix_original_label comes from stance_refit_20260908fix.csv's new_stance column alone (the validated Sept 8, 2026 fix), not cross-checked against the later prompt-experiment CSVs."
+    }
   },
   "cohort_b": {
     "row_count": 155,

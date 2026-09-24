@@ -13,6 +13,7 @@ from dataset_builder import (
     compute_pair_id,
     establish_original_predictions,
     load_csv_predictions,
+    load_post_fix_predictions,
     load_stance_evaluations,
     resolve_cohort_a,
     write_dataset,
@@ -107,6 +108,42 @@ def test_establish_original_predictions_disagreement_is_unresolved():
 
 
 # ---------------------------------------------------------------------------
+# load_post_fix_predictions
+# ---------------------------------------------------------------------------
+
+
+def test_load_post_fix_predictions_reads_new_stance():
+    df = pd.DataFrame(
+        [
+            {"pair_id": "p1", "new_stance": "in favor"},
+            {"pair_id": "p2", "new_stance": "neutral"},
+        ]
+    )
+
+    result = load_post_fix_predictions(df)
+
+    assert result == {"p1": StanceLabelV2.IN_FAVOR, "p2": StanceLabelV2.NEUTRAL}
+
+
+def test_load_post_fix_predictions_skips_unrecognized_values():
+    df = pd.DataFrame([{"pair_id": "p1", "new_stance": "not a real label"}])
+
+    result = load_post_fix_predictions(df)
+
+    assert result == {}
+
+
+def test_load_post_fix_predictions_does_not_cross_check_agreement():
+    """Unlike establish_original_predictions, a single source is trusted
+    directly -- there is nothing to cross-check it against here."""
+    df = pd.DataFrame([{"pair_id": "p1", "new_stance": "against"}])
+
+    result = load_post_fix_predictions(df)
+
+    assert result == {"p1": StanceLabelV2.AGAINST}
+
+
+# ---------------------------------------------------------------------------
 # resolve_cohort_a -- synthetic stance_evaluations rows
 # ---------------------------------------------------------------------------
 
@@ -140,6 +177,26 @@ def test_correct_verdict_uses_established_original():
     assert resolved[0].tier == "A"
     assert resolved[0].reference_label == "in_favor"
     assert resolved[0].basis == "verdict_correct"
+
+
+def test_resolve_cohort_a_threads_post_fix_original_label():
+    df = pd.DataFrame([_eval_row(verdict="correct")])
+    pair_id = df.iloc[0]["pair_id"]
+    established = {pair_id: StanceLabelV2.IN_FAVOR}
+    post_fix = {pair_id: StanceLabelV2.AGAINST}
+
+    resolved = resolve_cohort_a(df, established, post_fix)
+
+    assert resolved[0].post_fix_original_label == "against"
+
+
+def test_resolve_cohort_a_post_fix_defaults_to_none_when_uncovered():
+    df = pd.DataFrame([_eval_row(verdict="correct")])
+    established = {df.iloc[0]["pair_id"]: StanceLabelV2.IN_FAVOR}
+
+    resolved = resolve_cohort_a(df, established)  # no post_fix argument at all
+
+    assert resolved[0].post_fix_original_label is None
 
 
 def test_correct_verdict_without_established_original_is_unresolved():
@@ -401,3 +458,35 @@ def test_build_dataset_end_to_end(tmp_path):
     assert eval_db.exists()
     for path in csv_sources.values():
         assert path.exists()
+
+
+def test_build_dataset_threads_post_fix_original_label_when_sept8_fix_present(tmp_path):
+    eval_db = tmp_path / "eval.sq3"
+    _make_sqlite_db(
+        eval_db,
+        [dict(id=1, contribution_id=1, key_message="km1", comment_text="c1", verdict="correct", evaluator="Antonie")],
+    )
+
+    csv_dir = tmp_path / "csvs"
+    csv_dir.mkdir()
+    df = pd.DataFrame(
+        [{"contribution_id": 1, "key_message": "km1", "comment_text": "c1", "old_stance": "in favor", "new_stance": "against"}]
+    )
+    sept8_path = csv_dir / "sept8_fix.csv"
+    df.to_csv(sept8_path, index=False)
+
+    gold_path = tmp_path / "gold.json"
+    gold_path.write_text(
+        json.dumps(
+            [{"row_index": 0, "project_id": "proj-x", "contribution_id": 99, "key_message": "gkm", "comment_text": "gc", "gold_stance": "neutral"}]
+        ),
+        encoding="utf-8",
+    )
+
+    result = build_dataset(
+        eval_db_path=eval_db, csv_sources={"sept8_fix": sept8_path}, gold_labels_path=gold_path
+    )
+
+    assert result.pairs_a.iloc[0]["established_original_label"] == "in_favor"
+    assert result.pairs_a.iloc[0]["post_fix_original_label"] == "against"
+    assert result.manifest["cohort_a"]["post_fix_coverage"]["resolved_rows_with_post_fix_label"] == 1

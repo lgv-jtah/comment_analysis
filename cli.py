@@ -22,7 +22,7 @@ import evaluator_v2
 from benchmark import run_benchmark
 from dataset_builder import build_dataset, write_dataset
 from fold_builder import load_folds
-from historical_baseline import build_historical_predictions
+from historical_baseline import build_historical_predictions, build_post_fix_baseline_predictions
 
 load_dotenv()
 
@@ -275,6 +275,35 @@ def _run_historical_baseline(args: argparse.Namespace) -> None:
         _print_metrics("Overall", evaluator_v2.evaluate(predictions, reference))
 
 
+def _run_post_fix_baseline(args: argparse.Namespace) -> None:
+    """Score the validated Sept 8, 2026 fix's own predictions.
+
+    More recent than the historical-baseline subcommand's
+    established_original_label (the pipeline's state *before* that fix) --
+    see historical_baseline.build_post_fix_baseline_predictions's docstring.
+    """
+    reference = pd.read_parquet(args.reference)
+    predictions = build_post_fix_baseline_predictions(reference)
+
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    predictions.to_parquet(output_path)
+    console.print(
+        f"[green]Wrote {len(predictions)} post-fix-baseline predictions to {output_path}[/green] "
+        f"[dim]({len(reference)} reference rows total; coverage gaps are excluded, not guessed)[/dim]"
+    )
+
+    folds_path = Path(args.folds) if args.folds else None
+    if folds_path and folds_path.exists():
+        fold_assignment = load_folds(folds_path)
+        by_fold = evaluator_v2.evaluate_by_fold(predictions, reference, fold_assignment)
+        for entry in by_fold["per_fold"]:
+            _print_metrics(f"Fold {entry['fold']}", entry["metrics"])
+        _print_metrics("Pooled out-of-fold", by_fold["pooled"])
+    else:
+        _print_metrics("Overall", evaluator_v2.evaluate(predictions, reference))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cli.py", description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -371,6 +400,24 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Path to a persisted fold assignment (default: {DEFAULT_FOLDS_PATH}).",
     )
     historical_parser.set_defaults(func=_run_historical_baseline)
+
+    post_fix_parser = subparsers.add_parser(
+        "post-fix-baseline",
+        help="Score the validated Sept 8, 2026 fix's own predictions (post_fix_original_label) -- "
+        "more recent than historical-baseline's pre-fix established_original_label.",
+    )
+    post_fix_parser.add_argument("--output", required=True, help="Path to write the predictions parquet.")
+    post_fix_parser.add_argument(
+        "--reference",
+        default=str(DEFAULT_REFERENCE_PATH),
+        help=f"Path to the reference dataset (default: {DEFAULT_REFERENCE_PATH}).",
+    )
+    post_fix_parser.add_argument(
+        "--folds",
+        default=str(DEFAULT_FOLDS_PATH),
+        help=f"Path to a persisted fold assignment (default: {DEFAULT_FOLDS_PATH}).",
+    )
+    post_fix_parser.set_defaults(func=_run_post_fix_baseline)
 
     return parser
 

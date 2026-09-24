@@ -218,6 +218,36 @@ def establish_original_predictions(
     return OriginalPredictionResult(established, disagreements)
 
 
+def load_post_fix_predictions(sept8_fix_df: pd.DataFrame) -> dict[str, StanceLabelV2]:
+    """Loads the validated Sept 8, 2026 fix's own predictions (new_stance).
+
+    Unlike establish_original_predictions (which cross-checks old_stance
+    across all six CSVs, requiring agreement), this reads new_stance from
+    stance_refit_20260908fix.csv alone. The other five CSVs
+    (evaluation_data/experiments/exp_*.csv) are later, different
+    prompt-engineering experiments, not revisions of this fix -- their
+    new_stance values are different systems' predictions, so cross-checking
+    them against each other for "agreement" would conflate unrelated runs
+    rather than validate one.
+
+    Args:
+        sept8_fix_df: The already-loaded, already-duplicate-collapsed
+            stance_refit_20260908fix.csv frame (csv_frames["sept8_fix"] in
+            build_dataset()), with pair_id and new_stance columns.
+
+    Returns:
+        pair_id -> StanceLabelV2, for every row whose new_stance normalizes
+        to a recognized label. Rows with an unrecognized/missing new_stance
+        are simply absent -- this is real coverage, not guessed.
+    """
+    result: dict[str, StanceLabelV2] = {}
+    for row in sept8_fix_df.itertuples():
+        label = normalize_legacy_label(row.new_stance)
+        if label is not None:
+            result[row.pair_id] = label
+    return result
+
+
 # --------------------------------------------------------------------------
 # Tier A / Tier B resolution
 # --------------------------------------------------------------------------
@@ -244,10 +274,13 @@ class ResolvedPair:
     supporting_text: str | None = None
     parser_rule: str | None = None
     established_original_label: str | None = None
+    post_fix_original_label: str | None = None
     label_source: str = "human_gold"
 
 
-def _resolve_verdict(row, established_label: StanceLabelV2 | None) -> ResolvedPair:
+def _resolve_verdict(
+    row, established_label: StanceLabelV2 | None, post_fix_label: StanceLabelV2 | None
+) -> ResolvedPair:
     """Resolve one stance_evaluations row on its own (no overlap check yet)."""
     base = dict(
         pair_id=row.pair_id,
@@ -260,6 +293,7 @@ def _resolve_verdict(row, established_label: StanceLabelV2 | None) -> ResolvedPa
         verdict=row.verdict,
         resolution_status="unresolved",
         established_original_label=established_label.value if established_label else None,
+        post_fix_original_label=post_fix_label.value if post_fix_label else None,
     )
 
     if row.verdict == "correct":
@@ -311,7 +345,9 @@ def _resolve_verdict(row, established_label: StanceLabelV2 | None) -> ResolvedPa
 
 
 def resolve_cohort_a(
-    eval_df: pd.DataFrame, established: dict[str, StanceLabelV2]
+    eval_df: pd.DataFrame,
+    established: dict[str, StanceLabelV2],
+    post_fix: dict[str, StanceLabelV2] | None = None,
 ) -> list[ResolvedPair]:
     """Resolve every stance_evaluations row into a ResolvedPair.
 
@@ -320,7 +356,18 @@ def resolve_cohort_a(
     reported as an overlap (secondary row kept, reported separately, never
     merged into the primary denominator); disagreement quarantines BOTH
     rows for that pair rather than silently preferring one evaluator.
+
+    Args:
+        eval_df: stance_evaluations rows with a pair_id column.
+        established: pair_id -> the cross-checked original (pre-Sept-8-fix)
+            prediction, from establish_original_predictions().
+        post_fix: pair_id -> the validated Sept 8, 2026 fix's own
+            prediction, from load_post_fix_predictions(). Optional --
+            defaults to no post-fix coverage (every row's
+            post_fix_original_label stays None) so existing callers keep
+            working unchanged.
     """
+    post_fix = post_fix or {}
     by_pair: dict[str, list] = {}
     for row in eval_df.itertuples():
         by_pair.setdefault(row.pair_id, []).append(row)
@@ -328,7 +375,8 @@ def resolve_cohort_a(
     resolved: list[ResolvedPair] = []
     for pair_id, rows in by_pair.items():
         established_label = established.get(pair_id)
-        provisional = [_resolve_verdict(row, established_label) for row in rows]
+        post_fix_label = post_fix.get(pair_id)
+        provisional = [_resolve_verdict(row, established_label, post_fix_label) for row in rows]
 
         primary = [p for p in provisional if p.cohort_role == "primary"]
         secondary = [p for p in provisional if p.cohort_role == "secondary"]
@@ -518,6 +566,9 @@ def build_manifest(
 
     primary_count = sum(1 for p in resolved_a if p.cohort_role == "primary")
     secondary_count = sum(1 for p in resolved_a if p.cohort_role == "secondary")
+    resolved_with_post_fix = sum(
+        1 for p in resolved_a if p.resolution_status == "resolved" and p.post_fix_original_label is not None
+    )
 
     return {
         "schema_version": DATASET_SCHEMA_VERSION,
@@ -544,6 +595,12 @@ def build_manifest(
                 for source, r in duplicate_reports.items()
             },
             "original_prediction_disagreements": original_prediction_result.disagreements,
+            "post_fix_coverage": {
+                "resolved_rows_with_post_fix_label": resolved_with_post_fix,
+                "note": "post_fix_original_label comes from stance_refit_20260908fix.csv's "
+                "new_stance column alone (the validated Sept 8, 2026 fix), not "
+                "cross-checked against the later prompt-experiment CSVs.",
+            },
         },
         "cohort_b": {
             "row_count": len(cohort_b),
@@ -599,7 +656,10 @@ def build_dataset(
         csv_frames[name] = result.collapsed
 
     original_prediction_result = establish_original_predictions(csv_frames)
-    resolved_a = resolve_cohort_a(eval_df, original_prediction_result.established)
+    post_fix_predictions = (
+        load_post_fix_predictions(csv_frames["sept8_fix"]) if "sept8_fix" in csv_frames else {}
+    )
+    resolved_a = resolve_cohort_a(eval_df, original_prediction_result.established, post_fix_predictions)
 
     pairs_a = pd.DataFrame([asdict(p) for p in resolved_a])
     quarantine = pairs_a[pairs_a["resolution_status"] == "quarantined"].copy()

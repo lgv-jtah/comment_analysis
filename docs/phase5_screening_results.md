@@ -6,6 +6,48 @@ scope/attribution-plus-stance (two-stage) engine, and a best-development
 configuration with an optional independent verifier, on the existing
 grouped folds (`dataset/folds_v1.json`).
 
+## Which historical baseline?
+
+`dataset/pairs.parquet` carries **two** distinct pre-policy-v2 baseline
+columns, deliberately not merged (`dataset_builder.load_post_fix_predictions`'s
+docstring has the full rationale):
+
+- **`established_original_label`** -- the pipeline's prediction from
+  *before* the Sept 8, 2026 code fix that was already applied earlier in
+  this project. Cross-checked for agreement across all six
+  `evaluation_data/` CSVs (`old_stance` column). 100% coverage (713/713
+  resolved pairs). This is what every number in this document labeled
+  "historical baseline" uses.
+- **`post_fix_original_label`** -- the *actual* Sept 8 fix's own
+  prediction (`new_stance`, from `stance_refit_20260908fix.csv` alone --
+  the other five CSVs are later, unrelated prompt experiments, not
+  revisions of this fix, so their `new_stance` values are never
+  cross-checked against it). Also 713/713 coverage in practice (that CSV
+  happens to cover the full resolved cohort).
+
+**Scored against the identical audited reference labels, the post-fix
+baseline is not better than the pre-fix one -- it's very slightly worse:**
+
+| | eligible pairs | pooled OOF forced_choice_accuracy | against | in_favor | neutral |
+|---|---|---|---|---|---|
+| Pre-fix (`established_original_label`) | 721 | **0.732** (528/721) | 0.450 | 0.912 | 0.658 |
+| Post-fix (`post_fix_original_label`) | 721 | **0.716** (516/721) | 0.467 | 0.915 | 0.623 |
+
+(`cli.py post-fix-baseline`, artifact at
+`dataset/experiments/post_fix_baseline_predictions.parquet`.) The fix
+traded a small `against`-class gain (0.450->0.467) for a bigger
+`neutral`-class loss (0.658->0.623), netting slightly negative under this
+audited scoring -- the opposite direction from the "+2pp" figure
+referenced earlier in this project, which was computed by a different,
+less rigorous method before this session's Tier A/B dataset audit
+existed. **This does not change any conclusion in this document**: every
+policy-v2 comparison here already used `established_original_label`
+(0.732, the *higher* of the two baselines), so if anything the policy-v2
+architecture's real gap to "the best available legacy number" is very
+slightly smaller than what's reported below, not larger. Recorded here so
+the choice of baseline is an auditable, reproducible decision rather than
+an unstated assumption.
+
 ## Screening subset
 
 A full run on all 257 comments takes 30-70+ minutes per variant (the
