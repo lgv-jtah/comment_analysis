@@ -320,24 +320,73 @@ pandas analysis that found it this time. 5 new tests
 degrades gracefully (returns `{}`) when a predictions file has no `basis`
 column at all, rather than crashing.
 
+The general-approval reporting decision itself was resolved separately
+(see `docs/stance_policy_v2.md`'s "Reporting" section, added after this
+document identified the split).
+
+## Investigated `unaddressed` (0.644 accuracy) -- negative result, reverted
+
+Pulled the 16 accepted-but-wrong `unaddressed`-basis pairs from the v3
+run and read them by hand, same method as the two prior clusters.
+Pattern: 100% of these errors predict `neutral` while the reference says
+`in_favor` (12) or `against` (4) -- i.e. the scope stage decided a key
+message wasn't addressed, but the historical annotator thought it was.
+Roughly 11 of 16 traced to one specific, well-defined shape: a
+contribution with several **near-duplicate key messages describing the
+same underlying issue in different words** (contribution 7672 alone --
+"Fußgängerüberweg fehlt auf Höhe des Spielplatzes" / "Bestehende
+Querungsmöglichkeiten sind zu weit entfernt" / "Verkehrssituation ist für
+Kinder gefährlich" / "Bedarf an Querung hat sich erhöht" / "Einrichtung
+einer Querung auf Höhe der Hausnummer 97 anbieten" -- five phrasings of
+"a safe crossing is missing here" -- accounts for 7 of the 16). A
+generically-supportive comment ("Eine sichere Querungsmöglichkeit fehlt
+wirklich.") gets attributed to exactly one of the five by the scope
+stage; the historical annotator evidently attributed such comments more
+liberally, to several/all of the closely related key messages.
+
+**Attempted fix**: added explicit guidance to
+`prompts/scope_attribution_user.txt` telling the model to attribute a
+generically on-topic comment to *all* key messages that restate the same
+underlying issue (carefully worded to distinguish this from "mere topical
+proximity," which the prompt already correctly rejects -- e.g. "more bike
+stands" and "remove parking" are both bike/traffic topics but independent
+asks, and must NOT be conflated).
+
+**Result: no reliable effect on the target metric, with an early
+regression signal elsewhere. Reverted.** Live-reproducing the exact 3
+`7672` comments that motivated the change showed the model still picking
+a single key message per comment, unchanged. A full fold-0 re-run
+(`dataset/experiments/screening_fold0_mistral-nemo_two_stage_v4multitarget.parquet`,
+kept as a record) confirmed this at scale: `unaddressed` accuracy moved
+0.644 -> 0.660, within run-to-run noise, not a real improvement. Worse,
+`general_approval`'s absolute wrong-count *increased* (27 accepted @
+0.111 -> 32 accepted @ 0.094, roughly 24 -> 29 wrong), including a new
+case -- "Dringender Handlungsbedarf" ("urgent need for action"), a terse
+non-specific exclamation -- getting classified as blanket
+`whole_contribution_approval` and spreading `in_favor` across 4 key
+messages the historical annotator scored `neutral`. This is a small early
+signal of nudging the model back toward the cross-key-message "bleed"
+false-positive pattern that motivated this entire pipeline redesign in
+the first place (see the original diagnosis this project started from).
+Given the change achieved none of its intended benefit and showed this
+risk, it was reverted (`git checkout -- prompts/scope_attribution_user.txt`)
+rather than iterated on with stronger wording, which would only increase
+that risk. `unaddressed`'s 0.644 accuracy stands as a real, currently
+unresolved secondary effect -- worth revisiting with a different
+approach (e.g. dataset-level: flagging/merging near-duplicate key
+messages at the reporting layer rather than changing model attribution
+behavior), but not blocking anything else.
+
 ## Status
 
-**Direction is now clear: the architecture works; the general-approval
-policy needs a reporting decision, not a bug fix.** Concretely, next
-steps:
-1. **Decide how to report the general-approval/historical-label split**
-   in the final report, per brief section 3 -- e.g. report
-   `accepted_accuracy` two ways: against historical labels as-is (what
-   the tables above show), and with `general_approval`-basis pairs
-   scored/reported separately rather than penalized against
-   pre-policy labels. This is a reporting decision, not further tuning,
-   and the brief explicitly asks for it rather than picking one number.
-2. Optionally, investigate `unaddressed` (0.644 accuracy, the one
-   remaining basis with real room to improve) the same way the two prior
-   clusters were investigated, though it is a secondary effect.
-3. Once the reporting approach is settled, re-run the fold-0 screening
-   comparison one more time with the by-basis view in hand to confirm the
-   overall picture, then proceed to the full-cohort comparison and
-   (separately, cross-repo) provisioning Llama 3.3 70B / Mistral Small
-   24B on the LiteLLM proxy if a broader model sweep is still wanted at
-   that point.
+**Direction is now clear and mostly actioned.** What remains:
+1. ~~Decide how to report the general-approval/historical-label split~~
+   -- done, see `docs/stance_policy_v2.md`.
+2. ~~Investigate `unaddressed`~~ -- done; real pattern found, one fix
+   attempted and reverted as ineffective/risky (above). Left open for a
+   different approach if pursued further.
+3. Re-run the fold-0 screening comparison one more time on the current
+   (post-revert) codebase state to get a clean, final fold-0 number, then
+   proceed to the full-cohort comparison and (separately, cross-repo)
+   provisioning Llama 3.3 70B / Mistral Small 24B on the LiteLLM proxy if
+   a broader model sweep is still wanted at that point.
