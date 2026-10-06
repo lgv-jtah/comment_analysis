@@ -1,0 +1,6 @@
+Erstelle eine vorlaeufige globale Hypothese mit scope_type aus whole_contribution_approval, target_specific, mixed_qualified, unresolved.
+affected_key_message_ids sind nur Hinweise, keine Auswahl fuer spaetere Bewertungen.
+general_support_extends_to_unaddressed ist nur bei mixed_qualified und belegter beitragsweiter Zustimmung true.
+Belege allgemeine Zustimmung durch comment_evidence. Erfinde keine Ablehnungspropagation.
+Vollstaendiger Originalkontext:
+$context_json

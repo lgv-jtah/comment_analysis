@@ -1,0 +1,58 @@
+Klassifiziere die Haltung (Stance) des Kommentars gegenüber der Kernaussage.
+
+## Kategorien
+
+- IN FAVOR: Zustimmung zur Kernaussage (auch allgemeine Zustimmung wie "Richtig!", "Genau!", "Die Ansicht teile ich")
+- AGAINST: Direkter, eindeutiger Widerspruch zur Kernaussage (sehr selten, ca. 2%)
+- NEUTRAL: Kein klarer Bezug zur Kernaussage, anderes Thema, oder keine klare Position
+
+## Regeln
+
+- Anderes Thema = NEUTRAL, nicht AGAINST
+- Ergänzung/Erweiterung = IN FAVOR, nicht AGAINST
+- Nuancierte Zustimmung = IN FAVOR oder NEUTRAL, nicht AGAINST
+
+## Beispiele
+
+Beispiel 1 – IN FAVOR:
+Kernaussage: Taubenschläge sind eine Lösung
+Kommentar: Sehr gut! Integration statt Bekämpfung. Mit betreuten Taubenschlägen könnten die Probleme für alle Seiten befriedigend gelöst werden.
+→ Direkte Zustimmung. IN FAVOR.
+
+Beispiel 2 – AGAINST:
+Kernaussage: Fahrradverkehr ist verboten
+Kommentar: Auf Google Street View sieht man hier bereits ein "Fahrradverkehr frei" Schild.
+→ Direkter Widerspruch mit Beweis. AGAINST.
+
+Beispiel 3 – NEUTRAL:
+Kernaussage: Radfahrer gefährden Kinder
+Kommentar: Da musst du dich an den Bezirk Hamburg-Nord wenden.
+→ Anderes Thema. NEUTRAL.
+
+Beispiel 4 – IN FAVOR (allgemeine Zustimmung):
+Kernaussage: Radwege sind nicht sicher
+Kommentar: Die Ansicht teile ich.
+→ Allgemeine Zustimmung. IN FAVOR.
+
+Beispiel 5 – NEUTRAL (NICHT AGAINST):
+Kernaussage: Parkplätze fehlen
+Kommentar: Für das geringe Fahrradaufkommen sind die jetzigen Radwege ausreichend.
+→ Spricht über Radwege, nicht über Parkplätze. Anderes Thema ≠ AGAINST. NEUTRAL.
+
+## Zu klassifizierender Fall
+
+Kernaussage: $key_message
+Kommentar: $text_source
+
+Gehe Schritt für Schritt vor:
+1. Was sagt der Kommentar tatsächlich aus?
+2. Was behauptet die Kernaussage?
+3. Bezieht sich der Kommentar auf die Kernaussage?
+4. Falls ja: Unterstützt er sie (IN FAVOR) oder widerspricht er ihr direkt (AGAINST)?
+5. Falls nein: NEUTRAL
+
+Antworte nach deiner Analyse im JSON-Format. Keine Backticks.
+  {
+    "stance": "<IN FAVOR | AGAINST | NEUTRAL>",
+    "explanation": "<Begründung auf Deutsch>"
+  }

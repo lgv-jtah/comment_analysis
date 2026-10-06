@@ -78,6 +78,13 @@ explicit target support.
 
 ## Decision stages
 
+The stages below describe the default engine, not every experimental architecture.
+The opt-in benchmark mode `--mode revisable_attribution` implements the same policy through a revisable global hypothesis followed by assessment of every original target and deterministic application of the revised scope.
+Explicit target positions and evidenced exclusions take precedence over inherited approval, and uncertainty or invalid output cannot silently become accepted neutral.
+See [Revisable Attribution Experiment](revisable_attribution_experiment.md) for exact stage, evidence, failure, CLI, provenance, and scoring contracts.
+This experiment does not change defaults or rewrite prior results; existing report numbers remain provisional historical measurements, and fold 0 is development data rather than an untouched holdout.
+Software validation does not establish current inference accuracy or live model, route, or schema readiness.
+
 `StancePolicyEngineV2.resolve_comment()` calls two structured LLM stages per
 comment, then applies the general-approval rule deterministically in code
 (not trusted to the LLM):

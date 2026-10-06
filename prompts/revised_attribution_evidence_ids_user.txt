@@ -1,0 +1,15 @@
+Pruefe die vorlaeufige Hypothese kritisch und korrigiere sie in revised_scope nach derselben Policy v2.
+Bewerte JEDE Original-Kernaussage genau einmal in der Liste targets, auch bei globaler Zustimmung, unresolved oder leeren affected_key_message_ids. IDs der Hypothese begrenzen niemals die Bewertung.
+attribution:
+explicit_target: explizite Zustimmung oder Ablehnung der Proposition, stance in_favor oder against und nichtleere comment_evidence_ids.
+explicit_exclusion: belegte Ausnahme von allgemeiner Zustimmung, auch neutral ist erlaubt; stance und nichtleere comment_evidence_ids sind Pflicht. Ein bloss nicht erwaehntes Ziel ist KEINE Ausnahme.
+unaddressed: nicht angesprochen, stance neutral oder null; gueltige globale Zustimmung wird erst durch die Orchestrierung vererbt.
+no_position: angesprochen ohne eigene Position, stance neutral oder null.
+unresolved: Bezug oder Position unklar; uncertainty_flags nennen. Eine vertretbare stance darf mit nichtleerer comment_evidence_ids als Review-Vorschlag erhalten bleiben.
+Explizite Positionen und Ausnahmen haben Vorrang vor allgemeiner Zustimmung. Ohne Ausnahme erbt ein Ziel nur gueltige revidierte globale Zustimmung, nie globale Ablehnung.
+Vorlaeufige validierte ID-Hypothese (revidierbar):
+$hypothesis_json
+Vollstaendiger Originalkontext mit ALLEN Zielen und Elternkontext:
+$context_json
+Zulaessige Evidenztabelle (Offsets: Unicode-Codepoints, halboffen [start,end), relativ zum angegebenen Quellfeld):
+$evidence_table_json

@@ -91,9 +91,7 @@ def test_build_post_fix_baseline_predictions_uses_post_fix_original_label():
     assert predictions.iloc[0]["basis"] == "post_fix_historical"
 
 
-def test_build_post_fix_baseline_predictions_excludes_uncovered_rows():
-    """A row with no post_fix_original_label (not in stance_refit_20260908fix.csv)
-    is excluded entirely, not guessed from established_original_label."""
+def test_build_post_fix_baseline_predictions_fails_uncovered_rows():
     reference = pd.DataFrame(
         [
             _reference_row(pair_id="p1", post_fix_original_label="in_favor"),
@@ -103,8 +101,9 @@ def test_build_post_fix_baseline_predictions_excludes_uncovered_rows():
 
     predictions = build_post_fix_baseline_predictions(reference)
 
-    assert len(predictions) == 1
-    assert predictions.iloc[0]["pair_id"] == "p1"
+    assert len(predictions) == 2
+    assert predictions.iloc[1]["status"] == "failed"
+    assert pd.isna(predictions.iloc[1]["proposed_stance"])
 
 
 def test_build_post_fix_baseline_predictions_empty_when_no_coverage():
@@ -112,4 +111,5 @@ def test_build_post_fix_baseline_predictions_empty_when_no_coverage():
 
     predictions = build_post_fix_baseline_predictions(reference)
 
-    assert len(predictions) == 0
+    assert len(predictions) == 1
+    assert predictions.iloc[0]["status"] == "failed"

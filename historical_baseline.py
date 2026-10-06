@@ -16,15 +16,14 @@ Two distinct historical baselines are built here, deliberately not merged:
     relevant "what does the last deployed system actually score" baseline
     -- see dataset_builder.load_post_fix_predictions's docstring.
 
-The historical pipeline had no review-routing concept (no
-accepted/needs_review/failed distinction) -- every prediction it made was
-final, so every row from either builder is "accepted".
+Available historical labels are accepted; missing or conflicting labels fail.
 """
 from __future__ import annotations
 
 import pandas as pd
 
 from whole_process import OUTPUT_COLUMNS_V2
+from evaluator_v2 import unique_predictions
 
 
 def build_historical_predictions(reference: pd.DataFrame) -> pd.DataFrame:
@@ -61,7 +60,7 @@ def build_historical_predictions(reference: pd.DataFrame) -> pd.DataFrame:
             "stance_model_name": "historical",
         }
     )
-    return predictions[OUTPUT_COLUMNS_V2]
+    return unique_predictions(predictions)[OUTPUT_COLUMNS_V2]
 
 
 def build_post_fix_baseline_predictions(reference: pd.DataFrame) -> pd.DataFrame:
@@ -73,12 +72,7 @@ def build_post_fix_baseline_predictions(reference: pd.DataFrame) -> pd.DataFrame
     dataset_builder.load_post_fix_predictions's docstring for why the two
     are kept separate rather than merged).
 
-    Unlike established_original_label (100% coverage across the resolved
-    cohort, by construction), post_fix_original_label only covers pairs
-    present in stance_refit_20260908fix.csv. Rows without it are excluded
-    from the returned frame entirely rather than guessed or defaulted --
-    the coverage gap is real and should show up as fewer eligible_pairs
-    when scored, not be papered over.
+    Missing labels remain failed predictions in the expected cohort.
 
     Args:
         reference: dataset/pairs.parquet's contents -- must include
@@ -86,10 +80,9 @@ def build_post_fix_baseline_predictions(reference: pd.DataFrame) -> pd.DataFrame
             post_fix_original_label.
 
     Returns:
-        One row per reference row that has a post_fix_original_label, in
-        OUTPUT_COLUMNS_V2 column order.
+        One row per unique pair, in OUTPUT_COLUMNS_V2 column order.
     """
-    covered = reference[reference["post_fix_original_label"].notna()]
+    covered = reference
     n = len(covered)
     predictions = pd.DataFrame(
         {
@@ -113,4 +106,4 @@ def build_post_fix_baseline_predictions(reference: pd.DataFrame) -> pd.DataFrame
             "stance_model_name": "post_fix_historical",
         }
     )
-    return predictions[OUTPUT_COLUMNS_V2]
+    return unique_predictions(predictions)[OUTPUT_COLUMNS_V2]

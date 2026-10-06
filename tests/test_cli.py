@@ -3,9 +3,38 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+from types import SimpleNamespace
 
 import cli
 from dataset_builder import AuditResult
+
+
+def test_evaluate_reports_all_expected_operational_pairs_separately_from_oof(tmp_path, monkeypatch):
+    reference = pd.DataFrame([
+        dict(pair_id="p1", contribution_id="c1", resolution_status="resolved", reference_label="neutral"),
+        dict(pair_id="p2", contribution_id="c2", resolution_status="resolved", reference_label="neutral"),
+        dict(pair_id="p3", contribution_id="c3", resolution_status="unresolved", reference_label=None),
+    ])
+    preds = pd.DataFrame([dict(pair_id="p1", status="accepted", proposed_stance="neutral", final_stance="neutral")])
+    ref_path, pred_path = tmp_path / "ref.parquet", tmp_path / "pred.parquet"
+    reference.to_parquet(ref_path)
+    preds.to_parquet(pred_path)
+    folds_path = tmp_path / "folds.json"
+    folds_path.write_text("{}")
+    folds = SimpleNamespace(folds=[dict(test_contribution_ids=["c1", "c2"])])
+    monkeypatch.setattr(cli, "load_folds", lambda path: folds)
+    output = tmp_path / "metrics.json"
+    command = ["evaluate", "--reference", str(ref_path), "--predictions", str(pred_path),
+               "--folds", str(folds_path), "--output", str(output)]
+    cli.main(command)
+    report = json.loads(output.read_text())
+    assert report["metrics"]["total_pairs"] == 3
+    assert report["metrics"]["operational_coverage"] == pytest.approx(1 / 3)
+    assert report["pooled_out_of_fold"]["total_pairs"] == 2
+    assert report["unassigned_expected_pairs"] == 1
+    folds.folds[0]["test_contribution_ids"] = ["c1"]
+    with pytest.raises(ValueError, match="Missing fold assignments"):
+        cli.main(command)
 
 
 def _fake_audit_result() -> AuditResult:
@@ -303,7 +332,7 @@ def test_benchmark_command_invokes_run_benchmark_and_writes_predictions(monkeypa
 
     async def fake_run_benchmark(**kwargs):
         calls["kwargs"] = kwargs
-        return pd.DataFrame(
+        frame = pd.DataFrame(
             [
                 {
                     "contribution_id": "1",
@@ -327,6 +356,11 @@ def test_benchmark_command_invokes_run_benchmark_and_writes_predictions(monkeypa
                 }
             ]
         )
+        checkpoint = kwargs["checkpoint"]
+        frame["run_id"] = kwargs["run_id"]
+        frame["pair_id"] = checkpoint.expected.pair_id.tolist()
+        checkpoint.commit_comment(frame.to_dict("records"))
+        return frame
 
     monkeypatch.setattr(cli, "run_benchmark", fake_run_benchmark)
 
@@ -396,7 +430,7 @@ def test_benchmark_command_scores_against_existing_reference_and_folds(monkeypat
     )
 
     async def fake_run_benchmark(**kwargs):
-        return pd.DataFrame(
+        frame = pd.DataFrame(
             [
                 {
                     "contribution_id": "1",
@@ -420,6 +454,11 @@ def test_benchmark_command_scores_against_existing_reference_and_folds(monkeypat
                 }
             ]
         )
+        checkpoint = kwargs["checkpoint"]
+        frame["run_id"] = kwargs["run_id"]
+        frame["pair_id"] = checkpoint.expected.pair_id.tolist()
+        checkpoint.commit_comment(frame.to_dict("records"))
+        return frame
 
     monkeypatch.setattr(cli, "run_benchmark", fake_run_benchmark)
 
@@ -508,7 +547,7 @@ def test_historical_baseline_command_writes_predictions_and_scores_them(tmp_path
 # ---------------------------------------------------------------------------
 
 
-def test_post_fix_baseline_command_excludes_uncovered_rows_and_scores(tmp_path, capsys):
+def test_post_fix_baseline_command_fails_uncovered_rows_and_scores(tmp_path, capsys):
     reference_path = tmp_path / "pairs.parquet"
     pd.DataFrame(
         [
@@ -551,9 +590,10 @@ def test_post_fix_baseline_command_excludes_uncovered_rows_and_scores(tmp_path, 
 
     assert output_path.exists()
     written = pd.read_parquet(output_path)
-    assert len(written) == 1
+    assert len(written) == 2
     assert written.iloc[0]["pair_id"] == "p1"
+    assert written.iloc[1]["status"] == "failed"
 
     out = capsys.readouterr().out
-    assert "Wrote 1 post-fix-baseline predictions" in out
+    assert "Wrote 2 post-fix-baseline predictions" in out
     assert "Overall" in out

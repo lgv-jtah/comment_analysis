@@ -19,12 +19,12 @@ from rich.console import Console
 from rich.table import Table
 
 import evaluator_v2
-from benchmark import run_benchmark
+from benchmark import run_benchmark, prepare_benchmark
+from benchmark_checkpoint import BenchmarkCheckpoint
 from dataset_builder import build_dataset, write_dataset
 from fold_builder import load_folds
 from historical_baseline import build_historical_predictions, build_post_fix_baseline_predictions
-
-load_dotenv()
+from revisable_attribution import REVISABLE_VARIANTS, validate_revisable_variant
 
 console = Console()
 
@@ -92,6 +92,9 @@ def _print_metrics(title: str, metrics: evaluator_v2.EvaluationMetricsV2) -> Non
     lines = [
         f"total_pairs={metrics.total_pairs}  eligible_pairs={metrics.eligible_pairs}"
         f"  unmatched_prediction_pairs={metrics.unmatched_prediction_pairs}",
+        f"unexpected_prediction_pairs={metrics.unexpected_prediction_pairs}  "
+        f"missing_prediction_pairs={metrics.missing_prediction_pairs}  "
+        f"conflicting_prediction_pairs={metrics.conflicting_prediction_pairs}",
         f"forced_choice_accuracy={metrics.forced_choice_accuracy:.3f} "
         f"({metrics.forced_choice_correct}/{metrics.eligible_pairs})",
         f"accepted_accuracy={metrics.accepted_accuracy if metrics.accepted_accuracy is None else f'{metrics.accepted_accuracy:.3f}'} "
@@ -150,15 +153,7 @@ def _basis_breakdown_to_json_dict(by_basis: dict[str, evaluator_v2.BasisMetrics]
 
 
 def _asdict_class_metrics(cm: evaluator_v2.ClassMetrics) -> dict:
-    return {
-        "label": cm.label,
-        "eligible": cm.eligible,
-        "accepted": cm.accepted,
-        "accepted_correct": cm.accepted_correct,
-        "accepted_accuracy": cm.accepted_accuracy,
-        "coverage": cm.coverage,
-        "insufficient_sample": cm.insufficient_sample,
-    }
+    return vars(cm)
 
 
 def _metrics_to_json_dict(metrics: evaluator_v2.EvaluationMetricsV2) -> dict:
@@ -172,36 +167,44 @@ def _run_evaluate(args: argparse.Namespace) -> None:
     """Score a predictions file against the reference dataset."""
     predictions = pd.read_parquet(args.predictions)
     reference = pd.read_parquet(args.reference)
-
-    label, baseline_acc = evaluator_v2.majority_class_baseline(reference)
-    console.print(f"[dim]Majority-class baseline: {label!r} @ {baseline_acc:.3f}[/dim]")
+    expected = pd.read_parquet(args.expected_cohort) if args.expected_cohort else None
+    selection = dict(expected_pairs=expected, role=args.role, tiers=args.tiers.split("+"))
+    fold_output = {}
 
     folds_path = Path(args.folds) if args.folds else None
     if folds_path and folds_path.exists():
         fold_assignment = load_folds(folds_path)
-        by_fold = evaluator_v2.evaluate_by_fold(predictions, reference, fold_assignment)
+        by_fold = evaluator_v2.evaluate_by_fold(predictions, reference, fold_assignment, **selection)
         for entry in by_fold["per_fold"]:
             _print_metrics(f"Fold {entry['fold']}", entry["metrics"])
         _print_metrics("Pooled out-of-fold", by_fold["pooled"])
-        result_for_output = by_fold["pooled"]
+        result_for_output = by_fold["overall"]
+        _print_metrics("Overall expected cohort", result_for_output)
+        fold_output = {
+            "pooled_out_of_fold": _metrics_to_json_dict(by_fold["pooled"]),
+            "unassigned_expected_pairs": by_fold["unassigned_expected_pairs"],
+        }
     else:
         if args.folds:
             console.print(f"[yellow]Folds file not found at {folds_path}; scoring without fold grouping.[/yellow]")
-        result_for_output = evaluator_v2.evaluate(predictions, reference)
+        result_for_output = evaluator_v2.evaluate(predictions, reference, **selection)
         _print_metrics("Overall", result_for_output)
 
-    by_basis = evaluator_v2.accepted_accuracy_by_basis(predictions, reference)
+    label, baseline_acc = evaluator_v2.majority_class_baseline(reference, **selection)
+    console.print(f"[dim]Majority-class baseline: {label!r} @ {baseline_acc:.3f}[/dim]")
+    by_basis = evaluator_v2.accepted_accuracy_by_basis(predictions, reference, **selection)
     _print_basis_breakdown(by_basis)
 
     if args.output:
         output_path = Path(args.output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, "w", encoding="utf-8") as f:
+        with open(output_path, "x", encoding="utf-8") as f:
             json.dump(
                 {
                     "majority_class_baseline": {"label": label, "accuracy": baseline_acc},
                     "metrics": _metrics_to_json_dict(result_for_output),
                     "accepted_accuracy_by_basis": _basis_breakdown_to_json_dict(by_basis),
+                    **fold_output,
                 },
                 f,
                 indent=2,
@@ -212,16 +215,43 @@ def _run_evaluate(args: argparse.Namespace) -> None:
 
 def _run_benchmark(args: argparse.Namespace) -> None:
     """Run the v2 engine over a frozen-extraction source and score it."""
+    validate_revisable_variant(args.revisable_variant, args.mode, args.verifier)
+    if args.dry_run and (args.resume or args.recover_stale_lock or args.evaluate_partial):
+        raise ValueError("Dry preparation cannot resume, recover or evaluate partial results")
+    if (args.recover_stale_lock or args.evaluate_partial) and not args.resume:
+        raise ValueError("Recovery and partial evaluation require --resume")
     source = pd.read_parquet(args.source)
     if args.limit:
         console.print(f"[cyan]Limiting to the first {args.limit} comments.[/cyan]")
 
-    base_url = args.base_url or os.getenv("STANCE_LLM_BASE_URL")
-    model_name = args.model_name or os.getenv("STANCE_LLM_MODEL_NAME")
+    if not args.dry_run:
+        load_dotenv()
+    model_name = args.model_name or (None if args.dry_run else os.getenv("STANCE_LLM_MODEL_NAME"))
+    base_url = args.base_url or (None if args.dry_run else os.getenv("STANCE_LLM_BASE_URL"))
+    preparation = dict(
+        source=source, source_path=args.source, reference_path=args.reference,
+        folds_path=args.folds, model_name=model_name,
+        mode=args.mode, limit=args.limit, enable_thinking=args.enable_thinking,
+        verifier_enabled=args.verifier, role=args.role, tiers=args.tiers.split("+"),
+        base_url=base_url, verify_ionos=not args.no_verify_ionos,
+        revisable_variant=args.revisable_variant,
+    )
+    if args.dry_run:
+        expected, manifest = prepare_benchmark(**preparation, output_path=args.output, dry_run=True)
+        console.print(f"Prepared {len(expected)} expected pairs; run_id={manifest['run_id']}")
+        console.print("Offline preparation only: no provider checks or inference performed.")
+        return
     api_key = args.api_key or os.getenv("STANCE_LLM_API_KEY", "")
 
-    predictions = asyncio.run(
-        run_benchmark(
+    with BenchmarkCheckpoint(output_path=args.output, resume=args.resume,
+                             recover_stale_lock=args.recover_stale_lock, **preparation) as checkpoint:
+        expected, manifest = checkpoint.expected, checkpoint.manifest
+        console.print(f"Prepared {len(expected)} expected pairs; run_id={manifest['run_id']}")
+        if args.evaluate_partial:
+            predictions = checkpoint.export_partial()
+            console.print("Explicit partial evaluation against the full original expected cohort.")
+        else:
+            asyncio.run(run_benchmark(
             source=source,
             base_url=base_url,
             model_name=model_name,
@@ -229,27 +259,28 @@ def _run_benchmark(args: argparse.Namespace) -> None:
             enable_thinking=args.enable_thinking,
             verifier_enabled=args.verifier,
             mode=args.mode,
+            revisable_variant=args.revisable_variant,
             verify_ionos=not args.no_verify_ionos,
             limit=args.limit,
-        )
-    )
-
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    predictions.to_parquet(output_path)
-    console.print(f"[green]Wrote {len(predictions)} predictions to {output_path}[/green]")
+            run_id=manifest["run_id"],
+                checkpoint=checkpoint,
+            ))
+            predictions = checkpoint.publish()
+            console.print(f"[green]Wrote {len(predictions)} predictions to {args.output}[/green]")
 
     reference_path = Path(args.reference)
     if reference_path.exists():
         reference = pd.read_parquet(reference_path)
+        selection = dict(expected_pairs=expected, role=args.role, tiers=args.tiers.split("+"))
         folds_path = Path(args.folds) if args.folds else None
         if folds_path and folds_path.exists():
             fold_assignment = load_folds(folds_path)
-            by_fold = evaluator_v2.evaluate_by_fold(predictions, reference, fold_assignment)
+            by_fold = evaluator_v2.evaluate_by_fold(predictions, reference, fold_assignment, **selection)
             _print_metrics("Pooled out-of-fold", by_fold["pooled"])
+            _print_metrics("Overall expected cohort", by_fold["overall"])
         else:
-            _print_metrics("Overall", evaluator_v2.evaluate(predictions, reference))
-        _print_basis_breakdown(evaluator_v2.accepted_accuracy_by_basis(predictions, reference))
+            _print_metrics("Overall", evaluator_v2.evaluate(predictions, reference, **selection))
+        _print_basis_breakdown(evaluator_v2.accepted_accuracy_by_basis(predictions, reference, **selection))
     else:
         console.print(f"[yellow]Reference file not found at {reference_path}; skipping scoring.[/yellow]")
 
@@ -271,6 +302,7 @@ def _run_historical_baseline(args: argparse.Namespace) -> None:
         for entry in by_fold["per_fold"]:
             _print_metrics(f"Fold {entry['fold']}", entry["metrics"])
         _print_metrics("Pooled out-of-fold", by_fold["pooled"])
+        _print_metrics("Overall expected cohort", by_fold["overall"])
     else:
         _print_metrics("Overall", evaluator_v2.evaluate(predictions, reference))
 
@@ -290,7 +322,7 @@ def _run_post_fix_baseline(args: argparse.Namespace) -> None:
     predictions.to_parquet(output_path)
     console.print(
         f"[green]Wrote {len(predictions)} post-fix-baseline predictions to {output_path}[/green] "
-        f"[dim]({len(reference)} reference rows total; coverage gaps are excluded, not guessed)[/dim]"
+        f"[dim]({len(reference)} annotation rows total; missing labels are failed predictions)[/dim]"
     )
 
     folds_path = Path(args.folds) if args.folds else None
@@ -300,6 +332,7 @@ def _run_post_fix_baseline(args: argparse.Namespace) -> None:
         for entry in by_fold["per_fold"]:
             _print_metrics(f"Fold {entry['fold']}", entry["metrics"])
         _print_metrics("Pooled out-of-fold", by_fold["pooled"])
+        _print_metrics("Overall expected cohort", by_fold["overall"])
     else:
         _print_metrics("Overall", evaluator_v2.evaluate(predictions, reference))
 
@@ -338,6 +371,9 @@ def build_parser() -> argparse.ArgumentParser:
         "scored without fold grouping if not found.",
     )
     evaluate_parser.add_argument("--output", default=None, help="Optional path to write metrics as JSON.")
+    evaluate_parser.add_argument("--expected-cohort", help="Prepared expected-pair parquet; defaults to selected reference.")
+    evaluate_parser.add_argument("--role", choices=["primary", "secondary", "all"], default="primary")
+    evaluate_parser.add_argument("--tiers", choices=["A", "A+B", "B"], default="A+B")
     evaluate_parser.set_defaults(func=_run_evaluate)
 
     benchmark_parser = subparsers.add_parser(
@@ -376,12 +412,19 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_parser.add_argument("--limit", type=int, default=None, help="Cap the number of comments processed.")
     benchmark_parser.add_argument(
         "--mode",
-        choices=["two_stage", "one_call"],
+        choices=["two_stage", "one_call", "revisable_attribution"],
         default="two_stage",
         help="Policy engine variant: 'two_stage' (StancePolicyEngineV2, default) or "
         "'one_call' (OneCallPolicyEngineV2) -- brief section 10's experiment matrix.",
     )
     benchmark_parser.set_defaults(func=_run_benchmark)
+    benchmark_parser.add_argument("--revisable-variant", choices=REVISABLE_VARIANTS, default="baseline")
+    benchmark_parser.add_argument("--dry-run", action="store_true", help="Write expected cohort and manifest offline, without loading credentials.")
+    benchmark_parser.add_argument("--resume", action="store_true", help="Resume an existing durable checkpoint, repeating only an interrupted comment.")
+    benchmark_parser.add_argument("--recover-stale-lock", action="store_true", help="Acknowledge a stale session after acquiring the process lock; requires --resume.")
+    benchmark_parser.add_argument("--evaluate-partial", action="store_true", help="With --resume, export and score saved comments against the full original cohort without inference.")
+    benchmark_parser.add_argument("--role", choices=["primary", "secondary", "all"], default="primary")
+    benchmark_parser.add_argument("--tiers", choices=["A", "A+B", "B"], default="A+B")
 
     historical_parser = subparsers.add_parser(
         "historical-baseline",

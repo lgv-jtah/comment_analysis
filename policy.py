@@ -64,19 +64,18 @@ class PairOutput:
         pair_id: Deterministic ID for (contribution, key_message, comment).
         key_message_id: Which key message this result is for.
         proposed_stance: The stance the pipeline arrived at, even if it was
-            ultimately routed to review rather than accepted. None only
-            when the underlying LLM call itself failed.
+            ultimately routed to review rather than accepted. None when
+            inference failed or review has no canonical proposal.
         status: "accepted", "needs_review", or "failed". Failed inference
             never silently becomes "accepted" + neutral.
         final_stance: Non-null only when status == "accepted".
-        basis: Why final_stance was assigned (e.g. "general_approval",
-            "explicit_target", "unaddressed", "no_position"), only set for
-            accepted results.
+        basis: Attribution (e.g. "general_approval", "explicit_target",
+            "explicit_exclusion", "unaddressed", "no_position"). Review may
+            retain the attribution, including "unresolved"; failed has None.
         comment_evidence: Verbatim comment substrings supporting the result.
         source_evidence: Verbatim related_sentences substrings, if used.
         explanation: Concise German justification from the LLM.
-        review_reasons: Why this pair needs review, empty unless
-            status == "needs_review".
+        review_reasons: Review or failure reasons; empty for accepted results.
         policy_version: Always "v2" for results from this engine.
         run_id: Carried from the CommentContext this result came from.
     """
@@ -177,13 +176,13 @@ def _needs_review(context: CommentContext, km: KeyMessageRef, reasons: list[str]
     )
 
 
-def _failed(context: CommentContext, km: KeyMessageRef) -> PairOutput:
+def _failed(context: CommentContext, km: KeyMessageRef, reasons: list[str] | None = None) -> PairOutput:
     return PairOutput(
         pair_id=compute_pair_id(context.contribution_id, km.text, context.comment_text),
         key_message_id=km.key_message_id,
         proposed_stance=None,
         status="failed",
-        review_reasons=["llm_call_failed"],
+        review_reasons=["llm_call_failed"] if reasons is None else reasons,
         run_id=context.run_id,
     )
 

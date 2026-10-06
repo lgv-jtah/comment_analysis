@@ -1,0 +1,100 @@
+Klassifiziere die Haltung (Stance) des Kommentars gegenüber der Kernaussage.
+
+## Wichtigstes Prinzip
+
+NEUTRAL ist die Standardklasse.
+
+Wähle IN FAVOR oder AGAINST nur, wenn der Kommentar sich eindeutig auf die Kernaussage bezieht und eine klare Haltung dazu ausdrückt.
+
+Gleiche Wörter, ähnliches Thema oder allgemeine thematische Nähe reichen nicht für IN FAVOR.
+
+## Kategorien
+
+* IN FAVOR: Der Kommentar stimmt der Kernaussage eindeutig zu, bestätigt sie, verstärkt sie, liefert ein unterstützendes Beispiel oder ergänzt sie in unterstützender Weise.
+* AGAINST: Der Kommentar widerspricht der Kernaussage direkt und eindeutig.
+* NEUTRAL: Der Kommentar hat keinen klaren Bezug zur Kernaussage, behandelt ein anderes Thema, ist nur thematisch verwandt, stellt eine Frage, gibt organisatorische Hinweise oder enthält keine klare Zustimmung bzw. keinen klaren Widerspruch.
+
+## Entscheidungsregeln
+
+1. Prüfe zuerst, ob Kommentar und Kernaussage dieselbe konkrete Behauptung behandeln.
+
+   * Falls nein: NEUTRAL.
+2. Prüfe dann, ob der Kommentar die Kernaussage eindeutig unterstützt.
+
+   * Falls ja: IN FAVOR.
+3. Prüfe, ob der Kommentar der Kernaussage direkt widerspricht.
+
+   * Falls ja: AGAINST.
+4. Wenn weder eindeutige Unterstützung noch eindeutiger Widerspruch vorliegt: NEUTRAL.
+
+## Zusätzliche Regeln
+
+* Anderes Thema = NEUTRAL, nicht AGAINST.
+* Thematische Nähe allein = NEUTRAL.
+* Beschreibung eines Problems = nicht automatisch IN FAVOR.
+* Ergänzung/Erweiterung = nur dann IN FAVOR, wenn sie die Kernaussage klar unterstützt.
+* Allgemeine Zustimmung wie "Richtig", "Genau", "Die Ansicht teile ich" = IN FAVOR.
+* Fragen, Hinweise, Zuständigkeitsverweise oder Verfahrensvorschläge = meistens NEUTRAL.
+* Bei Unsicherheit: NEUTRAL.
+
+## Beispiele
+
+Beispiel 1 – IN FAVOR:
+Kernaussage: Taubenschläge sind eine Lösung.
+Kommentar: Sehr gut! Integration statt Bekämpfung. Mit betreuten Taubenschlägen könnten die Probleme für alle Seiten befriedigend gelöst werden.
+→ Direkte Zustimmung und unterstützende Begründung. IN FAVOR.
+
+Beispiel 2 – AGAINST:
+Kernaussage: Fahrradverkehr ist verboten.
+Kommentar: Auf Google Street View sieht man hier bereits ein "Fahrradverkehr frei" Schild.
+→ Direkter Widerspruch mit Beweis. AGAINST.
+
+Beispiel 3 – NEUTRAL:
+Kernaussage: Radfahrer gefährden Kinder.
+Kommentar: Da musst du dich an den Bezirk Hamburg-Nord wenden.
+→ Organisatorischer Hinweis, keine Haltung zur Kernaussage. NEUTRAL.
+
+Beispiel 4 – IN FAVOR:
+Kernaussage: Radwege sind nicht sicher.
+Kommentar: Die Ansicht teile ich.
+→ Allgemeine Zustimmung. IN FAVOR.
+
+Beispiel 5 – NEUTRAL:
+Kernaussage: Parkplätze fehlen.
+Kommentar: Für das geringe Fahrradaufkommen sind die jetzigen Radwege ausreichend.
+→ Spricht über Radwege, nicht über fehlende Parkplätze. NEUTRAL.
+
+Beispiel 6 – NEUTRAL:
+Kernaussage: Die Kreuzung ist für Kinder gefährlich.
+Kommentar: An dieser Kreuzung gibt es morgens sehr viel Verkehr.
+→ Thematisch verwandt, aber keine eindeutige Aussage zur Gefährdung von Kindern. NEUTRAL.
+
+Beispiel 7 – NEUTRAL:
+Kernaussage: Mehr Fahrradstellplätze werden benötigt.
+Kommentar: Fahrräder stehen dort oft ungeordnet herum.
+→ Beschreibt ein verwandtes Problem, fordert oder unterstützt aber nicht eindeutig mehr Stellplätze. NEUTRAL.
+
+Beispiel 8 – IN FAVOR:
+Kernaussage: Mehr Fahrradstellplätze werden benötigt.
+Kommentar: Genau, es gibt dort viel zu wenige Abstellmöglichkeiten.
+→ Unterstützt die Kernaussage direkt. IN FAVOR.
+
+## Zu klassifizierender Fall
+
+Kernaussage: $key_message
+Kommentar: $text_source
+
+Analysiere kurz:
+
+1. Was behauptet die Kernaussage?
+2. Was sagt der Kommentar tatsächlich?
+3. Bezieht sich der Kommentar auf dieselbe konkrete Behauptung?
+4. Gibt es eindeutige Zustimmung oder eindeutigen Widerspruch?
+5. Falls unsicher: NEUTRAL.
+
+Antworte ausschließlich im JSON-Format. Keine Backticks.
+
+{
+"stance": "<IN FAVOR | AGAINST | NEUTRAL>",
+"explanation": "<kurze Begründung auf Deutsch>"
+}

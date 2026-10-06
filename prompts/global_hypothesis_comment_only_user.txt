@@ -1,0 +1,9 @@
+Erstelle eine vorlaeufige globale Hypothese mit scope_type aus whole_contribution_approval, target_specific, mixed_qualified, unresolved.
+affected_key_message_ids sind nur Hinweise, keine Auswahl fuer spaetere Bewertungen.
+general_support_extends_to_unaddressed ist nur bei mixed_qualified und belegter beitragsweiter Zustimmung true.
+Belege allgemeine Zustimmung durch comment_evidence. Erfinde keine Ablehnungspropagation.
+Jeder Eintrag in comment_evidence muss eine nichtleere, woertlich zusammenhaengende Textstelle ausschliesslich aus dem obersten Feld comment_text des Originalkontexts sein.
+Keine Belege aus contribution_text, Kernaussagen oder deren text, related_sentences, source_evidence, parent_context oder Erklaerungen verwenden.
+Nicht paraphrasieren, uebersetzen oder getrennte Textstellen zusammenfuegen.
+Vollstaendiger Originalkontext:
+$context_json

@@ -1,0 +1,14 @@
+{
+  "global_hypothesis": {
+    "system_prompt": "revisable_attribution_system.txt",
+    "user_prompt": "global_hypothesis_user.txt",
+    "policy_version": "v2",
+    "schema_version": "global_hypothesis_v1"
+  },
+  "revised_attribution": {
+    "system_prompt": "revisable_attribution_system.txt",
+    "user_prompt": "revised_attribution_user.txt",
+    "policy_version": "v2",
+    "schema_version": "revised_attribution_v1"
+  }
+}
