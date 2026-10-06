@@ -1,0 +1,155 @@
+{
+  "accepted_accuracy_by_basis": {
+    "explicit_exclusion": {
+      "accuracy": 1.0,
+      "basis": "explicit_exclusion",
+      "correct": 1,
+      "n": 1
+    },
+    "explicit_target": {
+      "accuracy": 0.6216216216216216,
+      "basis": "explicit_target",
+      "correct": 23,
+      "n": 37
+    },
+    "no_position": {
+      "accuracy": 0.6818181818181818,
+      "basis": "no_position",
+      "correct": 15,
+      "n": 22
+    },
+    "unaddressed": {
+      "accuracy": 0.7058823529411765,
+      "basis": "unaddressed",
+      "correct": 12,
+      "n": 17
+    }
+  },
+  "accepted_confusion_reference_rows": {
+    "against": {
+      "against": 3,
+      "neutral": 2
+    },
+    "in_favor": {
+      "in_favor": 20,
+      "neutral": 10
+    },
+    "neutral": {
+      "in_favor": 14,
+      "neutral": 28
+    }
+  },
+  "correct_automatic_answer_count": 51,
+  "correct_automatic_yield": 0.42857142857142855,
+  "eligible_missing": 0,
+  "eligible_status": {
+    "accepted": 77,
+    "needs_review": 42
+  },
+  "evaluation": {
+    "api": "evaluator_v2.evaluate and accepted_accuracy_by_basis; in-memory, no artifact writer",
+    "class_coverage": "Accepted pairs within each reference class / all eligible pairs in that class.",
+    "class_precision_recall": "Proposed labels on all eligible pairs, including review proposals; missing/failed have no proposal.",
+    "expected_pairs": 138,
+    "historical_filter": false,
+    "prediction_source": "dataset/experiments/screening_fold0_evidence_ids_20260928T142234517635Z_live.parquet",
+    "role": "primary",
+    "tiers": [
+      "A",
+      "B"
+    ]
+  },
+  "general_approval": {
+    "eligible_pairs": 0,
+    "note": "Historical-label disagreement is not adjudicated policy noncompliance; no new annotation.",
+    "proposed_labels": {},
+    "reference_agreements": 0,
+    "reference_labels": {},
+    "statuses": {}
+  },
+  "incorrect_automatic_answer_count": 26,
+  "metrics": {
+    "accepted_accuracy": 0.6623376623376623,
+    "accepted_correct": 51,
+    "accepted_pairs": 77,
+    "conflicting_prediction_pairs": 0,
+    "eligible_pairs": 119,
+    "failed_pairs": 0,
+    "failure_rate": 0.0,
+    "forced_choice_accuracy": 0.5630252100840336,
+    "forced_choice_correct": 67,
+    "identical_prediction_duplicates": 0,
+    "insufficient_sample": false,
+    "insufficient_sample_reason": null,
+    "labelled_coverage": 0.6470588235294118,
+    "macro_f1": 0.5731907894736842,
+    "missing_prediction_pairs": 0,
+    "operational_coverage": 0.6666666666666666,
+    "per_class": {
+      "against": {
+        "accepted": 5,
+        "accepted_accuracy": 0.6,
+        "accepted_correct": 3,
+        "coverage": 0.4166666666666667,
+        "eligible": 12,
+        "f1": 0.5,
+        "insufficient_sample": false,
+        "label": "against",
+        "precision": 1.0,
+        "recall": 0.3333333333333333,
+        "review_rate": 0.5833333333333334
+      },
+      "in_favor": {
+        "accepted": 30,
+        "accepted_accuracy": 0.6666666666666666,
+        "accepted_correct": 20,
+        "coverage": 0.8108108108108109,
+        "eligible": 37,
+        "f1": 0.5789473684210528,
+        "insufficient_sample": false,
+        "label": "in_favor",
+        "precision": 0.5641025641025641,
+        "recall": 0.5945945945945946,
+        "review_rate": 0.1891891891891892
+      },
+      "neutral": {
+        "accepted": 42,
+        "accepted_accuracy": 0.6666666666666666,
+        "accepted_correct": 28,
+        "coverage": 0.6,
+        "eligible": 70,
+        "f1": 0.640625,
+        "insufficient_sample": false,
+        "label": "neutral",
+        "precision": 0.7068965517241379,
+        "recall": 0.5857142857142857,
+        "review_rate": 0.4
+      }
+    },
+    "quarantined_reference_pairs": 0,
+    "review_pairs": 46,
+    "review_rate": 0.3333333333333333,
+    "total_pairs": 138,
+    "unexpected_prediction_pairs": 0,
+    "unmatched_prediction_pairs": 0
+  },
+  "nonnull_proposals": 101,
+  "proposed_confusion_reference_rows": {
+    "against": {
+      "against": 4,
+      "in_favor": 2,
+      "neutral": 6
+    },
+    "in_favor": {
+      "in_favor": 22,
+      "neutral": 11,
+      "no_proposal": 4
+    },
+    "neutral": {
+      "in_favor": 15,
+      "neutral": 41,
+      "no_proposal": 14
+    }
+  },
+  "review_correct_proposals": 16
+}

@@ -1,0 +1,14 @@
+{
+  "comparison.safe_summary.json": "e13acd5d9c31266924d7ffe8a0d9bb0615287e74ee082bc6c2e9c55e634f1135",
+  "gpt.primary_A.metrics.json": "da64be705d66dd4ab15e87150495d0f690a48d21cc66118b4e8589881c53b5eb",
+  "gpt.primary_AB.metrics.json": "072ddfacbc756acc0f47b921951b4083fecd32a47c993ff0565b0506e21243cc",
+  "legacy_post.primary_A.metrics.json": "eaad040b26a7509b2b12c4a3953baf81c5cfd94961ae0603dbe4beda369ea243",
+  "legacy_post.primary_AB.metrics.json": "12442e2f35b2dcac00ab9c3db36ad8015659a7d84ab2b28233f6fe49f54f1601",
+  "legacy_pre.primary_A.metrics.json": "50adab8f1ed9a7c7bff45ee9a77d7a0c52b6aada61f3591f87c9e05a23bae3b2",
+  "legacy_pre.primary_AB.metrics.json": "febfd6e86232469fc06400d1a45dbc00bb07d3e027ff9ebf4ce8f92680a330c9",
+  "nemo.primary_A.metrics.json": "46b3ddca05a0fd7952201c45376b626988ba042e2e9735a9b72e2da5bf452511",
+  "nemo.primary_AB.metrics.json": "df1cd7ffc922cac5521a40a973c7087615eb2ddad9278c86f9a2be6888bafb3a",
+  "protected_hashes.before_after.json": "18fa7e78b48846b4f0f9c76482afe9ffaa899d4d4f2a2394ab14578217eb2745",
+  "qwen_partial.primary_A.metrics.json": "63fe14415afe84ec64d522a3fdf321f7bdd058da51e64fe758249a0e5cb21a12",
+  "qwen_partial.primary_AB.metrics.json": "c46b614469494bffc8d6ee4c1dfcd26059b310ffe1777fc8cb889a15e46736b9"
+}

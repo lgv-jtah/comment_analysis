@@ -1,0 +1,137 @@
+{
+  "accepted_accuracy_by_basis": {
+    "post_fix_historical": {
+      "accuracy": 0.7310924369747899,
+      "basis": "post_fix_historical",
+      "correct": 87,
+      "n": 119
+    }
+  },
+  "accepted_confusion_reference_rows": {
+    "against": {
+      "against": 3,
+      "neutral": 9
+    },
+    "in_favor": {
+      "against": 1,
+      "in_favor": 35,
+      "neutral": 1
+    },
+    "neutral": {
+      "against": 4,
+      "in_favor": 17,
+      "neutral": 49
+    }
+  },
+  "correct_automatic_answer_count": 87,
+  "correct_automatic_yield": 0.7310924369747899,
+  "eligible_missing": 0,
+  "eligible_status": {
+    "accepted": 119
+  },
+  "evaluation": {
+    "api": "evaluator_v2.evaluate and accepted_accuracy_by_basis; in-memory, no artifact writer",
+    "class_coverage": "Accepted pairs within each reference class / all eligible pairs in that class.",
+    "class_precision_recall": "Proposed labels on all eligible pairs, including review proposals; missing/failed have no proposal.",
+    "expected_pairs": 138,
+    "historical_filter": true,
+    "prediction_source": "dataset/experiments/post_fix_baseline_predictions.parquet",
+    "role": "primary",
+    "tiers": [
+      "A",
+      "B"
+    ]
+  },
+  "general_approval": {
+    "eligible_pairs": 0,
+    "note": "Historical-label disagreement is not adjudicated policy noncompliance; no new annotation.",
+    "proposed_labels": {},
+    "reference_agreements": 0,
+    "reference_labels": {},
+    "statuses": {}
+  },
+  "incorrect_automatic_answer_count": 32,
+  "metrics": {
+    "accepted_accuracy": 0.7310924369747899,
+    "accepted_correct": 87,
+    "accepted_pairs": 119,
+    "conflicting_prediction_pairs": 0,
+    "eligible_pairs": 119,
+    "failed_pairs": 0,
+    "failure_rate": 0.0,
+    "forced_choice_accuracy": 0.7310924369747899,
+    "forced_choice_correct": 87,
+    "identical_prediction_duplicates": 0,
+    "insufficient_sample": false,
+    "insufficient_sample_reason": null,
+    "labelled_coverage": 1.0,
+    "macro_f1": 0.6154022588044015,
+    "missing_prediction_pairs": 0,
+    "operational_coverage": 1.0,
+    "per_class": {
+      "against": {
+        "accepted": 12,
+        "accepted_accuracy": 0.25,
+        "accepted_correct": 3,
+        "coverage": 1.0,
+        "eligible": 12,
+        "f1": 0.3,
+        "insufficient_sample": false,
+        "label": "against",
+        "precision": 0.375,
+        "recall": 0.25,
+        "review_rate": 0.0
+      },
+      "in_favor": {
+        "accepted": 37,
+        "accepted_accuracy": 0.9459459459459459,
+        "accepted_correct": 35,
+        "coverage": 1.0,
+        "eligible": 37,
+        "f1": 0.7865168539325843,
+        "insufficient_sample": false,
+        "label": "in_favor",
+        "precision": 0.6730769230769231,
+        "recall": 0.9459459459459459,
+        "review_rate": 0.0
+      },
+      "neutral": {
+        "accepted": 70,
+        "accepted_accuracy": 0.7,
+        "accepted_correct": 49,
+        "coverage": 1.0,
+        "eligible": 70,
+        "f1": 0.7596899224806201,
+        "insufficient_sample": false,
+        "label": "neutral",
+        "precision": 0.8305084745762712,
+        "recall": 0.7,
+        "review_rate": 0.0
+      }
+    },
+    "quarantined_reference_pairs": 0,
+    "review_pairs": 0,
+    "review_rate": 0.0,
+    "total_pairs": 138,
+    "unexpected_prediction_pairs": 0,
+    "unmatched_prediction_pairs": 0
+  },
+  "nonnull_proposals": 119,
+  "proposed_confusion_reference_rows": {
+    "against": {
+      "against": 3,
+      "neutral": 9
+    },
+    "in_favor": {
+      "against": 1,
+      "in_favor": 35,
+      "neutral": 1
+    },
+    "neutral": {
+      "against": 4,
+      "in_favor": 17,
+      "neutral": 49
+    }
+  },
+  "review_correct_proposals": 0
+}

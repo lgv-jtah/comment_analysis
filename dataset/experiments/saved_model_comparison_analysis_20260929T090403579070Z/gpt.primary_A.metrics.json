@@ -1,0 +1,167 @@
+{
+  "accepted_accuracy_by_basis": {
+    "explicit_exclusion": {
+      "accuracy": 1.0,
+      "basis": "explicit_exclusion",
+      "correct": 2,
+      "n": 2
+    },
+    "explicit_target": {
+      "accuracy": 0.5303030303030303,
+      "basis": "explicit_target",
+      "correct": 35,
+      "n": 66
+    },
+    "general_approval": {
+      "accuracy": 0.0,
+      "basis": "general_approval",
+      "correct": 0,
+      "n": 1
+    },
+    "no_position": {
+      "accuracy": 0.3333333333333333,
+      "basis": "no_position",
+      "correct": 1,
+      "n": 3
+    },
+    "unaddressed": {
+      "accuracy": 0.8064516129032258,
+      "basis": "unaddressed",
+      "correct": 25,
+      "n": 31
+    }
+  },
+  "accepted_confusion_reference_rows": {
+    "against": {
+      "against": 8,
+      "in_favor": 2,
+      "neutral": 2
+    },
+    "in_favor": {
+      "in_favor": 29,
+      "neutral": 6
+    },
+    "neutral": {
+      "against": 1,
+      "in_favor": 29,
+      "neutral": 26
+    }
+  },
+  "correct_automatic_answer_count": 63,
+  "correct_automatic_yield": 0.5384615384615384,
+  "eligible_missing": 0,
+  "eligible_status": {
+    "accepted": 103,
+    "needs_review": 14
+  },
+  "evaluation": {
+    "api": "evaluator_v2.evaluate and accepted_accuracy_by_basis; in-memory, no artifact writer",
+    "class_coverage": "Accepted pairs within each reference class / all eligible pairs in that class.",
+    "class_precision_recall": "Proposed labels on all eligible pairs, including review proposals; missing/failed have no proposal.",
+    "expected_pairs": 138,
+    "historical_filter": false,
+    "prediction_source": "dataset/experiments/model_comparison_checkpointed_20260929T064921105737Z_gptoss-120b_full.parquet",
+    "role": "primary",
+    "tiers": [
+      "A"
+    ]
+  },
+  "general_approval": {
+    "eligible_pairs": 1,
+    "note": "Historical-label disagreement is not adjudicated policy noncompliance; no new annotation.",
+    "proposed_labels": {
+      "in_favor": 1
+    },
+    "reference_agreements": 0,
+    "reference_labels": {
+      "neutral": 1
+    },
+    "statuses": {
+      "accepted": 1
+    }
+  },
+  "incorrect_automatic_answer_count": 40,
+  "metrics": {
+    "accepted_accuracy": 0.6116504854368932,
+    "accepted_correct": 63,
+    "accepted_pairs": 103,
+    "conflicting_prediction_pairs": 0,
+    "eligible_pairs": 117,
+    "failed_pairs": 0,
+    "failure_rate": 0.0,
+    "forced_choice_accuracy": 0.6495726495726496,
+    "forced_choice_correct": 76,
+    "identical_prediction_duplicates": 0,
+    "insufficient_sample": false,
+    "insufficient_sample_reason": null,
+    "labelled_coverage": 0.8803418803418803,
+    "macro_f1": 0.6775793650793651,
+    "missing_prediction_pairs": 0,
+    "operational_coverage": 0.8840579710144928,
+    "per_class": {
+      "against": {
+        "accepted": 12,
+        "accepted_accuracy": 0.6666666666666666,
+        "accepted_correct": 8,
+        "coverage": 1.0,
+        "eligible": 12,
+        "f1": 0.761904761904762,
+        "insufficient_sample": false,
+        "label": "against",
+        "precision": 0.8888888888888888,
+        "recall": 0.6666666666666666,
+        "review_rate": 0.0
+      },
+      "in_favor": {
+        "accepted": 35,
+        "accepted_accuracy": 0.8285714285714286,
+        "accepted_correct": 29,
+        "coverage": 0.9722222222222222,
+        "eligible": 36,
+        "f1": 0.6041666666666667,
+        "insufficient_sample": false,
+        "label": "in_favor",
+        "precision": 0.48333333333333334,
+        "recall": 0.8055555555555556,
+        "review_rate": 0.027777777777777776
+      },
+      "neutral": {
+        "accepted": 56,
+        "accepted_accuracy": 0.4642857142857143,
+        "accepted_correct": 26,
+        "coverage": 0.8115942028985508,
+        "eligible": 69,
+        "f1": 0.6666666666666667,
+        "insufficient_sample": false,
+        "label": "neutral",
+        "precision": 0.8125,
+        "recall": 0.5652173913043478,
+        "review_rate": 0.18840579710144928
+      }
+    },
+    "quarantined_reference_pairs": 0,
+    "review_pairs": 16,
+    "review_rate": 0.11594202898550725,
+    "total_pairs": 138,
+    "unexpected_prediction_pairs": 0,
+    "unmatched_prediction_pairs": 0
+  },
+  "nonnull_proposals": 117,
+  "proposed_confusion_reference_rows": {
+    "against": {
+      "against": 8,
+      "in_favor": 2,
+      "neutral": 2
+    },
+    "in_favor": {
+      "in_favor": 29,
+      "neutral": 7
+    },
+    "neutral": {
+      "against": 1,
+      "in_favor": 29,
+      "neutral": 39
+    }
+  },
+  "review_correct_proposals": 13
+}
