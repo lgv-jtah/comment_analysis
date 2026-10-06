@@ -1,0 +1,164 @@
+{
+  "majority_class_baseline": {
+    "label": "neutral",
+    "accuracy": 0.5882352941176471
+  },
+  "metrics": {
+    "total_pairs": 138,
+    "eligible_pairs": 119,
+    "forced_choice_correct": 87,
+    "forced_choice_accuracy": 0.7310924369747899,
+    "accepted_pairs": 92,
+    "accepted_correct": 69,
+    "accepted_accuracy": 0.75,
+    "labelled_coverage": 0.773109243697479,
+    "operational_coverage": 0.7753623188405797,
+    "review_pairs": 31,
+    "review_rate": 0.2246376811594203,
+    "failed_pairs": 0,
+    "failure_rate": 0.0,
+    "per_class": {
+      "against": {
+        "label": "against",
+        "eligible": 12,
+        "accepted": 10,
+        "accepted_correct": 7,
+        "accepted_accuracy": 0.7,
+        "coverage": 0.8333333333333334,
+        "insufficient_sample": false,
+        "precision": 0.8888888888888888,
+        "recall": 0.6666666666666666,
+        "f1": 0.761904761904762,
+        "review_rate": 0.16666666666666666
+      },
+      "in_favor": {
+        "label": "in_favor",
+        "eligible": 37,
+        "accepted": 34,
+        "accepted_correct": 16,
+        "accepted_accuracy": 0.47058823529411764,
+        "coverage": 0.918918918918919,
+        "insufficient_sample": false,
+        "precision": 0.8888888888888888,
+        "recall": 0.43243243243243246,
+        "f1": 0.5818181818181818,
+        "review_rate": 0.08108108108108109
+      },
+      "neutral": {
+        "label": "neutral",
+        "eligible": 70,
+        "accepted": 48,
+        "accepted_correct": 46,
+        "accepted_accuracy": 0.9583333333333334,
+        "coverage": 0.6857142857142857,
+        "insufficient_sample": false,
+        "precision": 0.7241379310344828,
+        "recall": 0.9,
+        "f1": 0.8025477707006369,
+        "review_rate": 0.3142857142857143
+      }
+    },
+    "insufficient_sample": false,
+    "insufficient_sample_reason": null,
+    "unmatched_prediction_pairs": 0,
+    "unexpected_prediction_pairs": 0,
+    "missing_prediction_pairs": 0,
+    "conflicting_prediction_pairs": 0,
+    "identical_prediction_duplicates": 0,
+    "quarantined_reference_pairs": 0,
+    "macro_f1": 0.7154235714745268
+  },
+  "accepted_accuracy_by_basis": {
+    "explicit_exclusion": {
+      "n": 1,
+      "correct": 1,
+      "accuracy": 1.0
+    },
+    "explicit_target": {
+      "n": 25,
+      "correct": 22,
+      "accuracy": 0.88
+    },
+    "general_approval": {
+      "n": 29,
+      "correct": 21,
+      "accuracy": 0.7241379310344828
+    },
+    "no_position": {
+      "n": 4,
+      "correct": 2,
+      "accuracy": 0.5
+    },
+    "unaddressed": {
+      "n": 33,
+      "correct": 23,
+      "accuracy": 0.696969696969697
+    }
+  },
+  "pooled_out_of_fold": {
+    "total_pairs": 138,
+    "eligible_pairs": 119,
+    "forced_choice_correct": 87,
+    "forced_choice_accuracy": 0.7310924369747899,
+    "accepted_pairs": 92,
+    "accepted_correct": 69,
+    "accepted_accuracy": 0.75,
+    "labelled_coverage": 0.773109243697479,
+    "operational_coverage": 0.7753623188405797,
+    "review_pairs": 31,
+    "review_rate": 0.2246376811594203,
+    "failed_pairs": 0,
+    "failure_rate": 0.0,
+    "per_class": {
+      "against": {
+        "label": "against",
+        "eligible": 12,
+        "accepted": 10,
+        "accepted_correct": 7,
+        "accepted_accuracy": 0.7,
+        "coverage": 0.8333333333333334,
+        "insufficient_sample": false,
+        "precision": 0.8888888888888888,
+        "recall": 0.6666666666666666,
+        "f1": 0.761904761904762,
+        "review_rate": 0.16666666666666666
+      },
+      "in_favor": {
+        "label": "in_favor",
+        "eligible": 37,
+        "accepted": 34,
+        "accepted_correct": 16,
+        "accepted_accuracy": 0.47058823529411764,
+        "coverage": 0.918918918918919,
+        "insufficient_sample": false,
+        "precision": 0.8888888888888888,
+        "recall": 0.43243243243243246,
+        "f1": 0.5818181818181818,
+        "review_rate": 0.08108108108108109
+      },
+      "neutral": {
+        "label": "neutral",
+        "eligible": 70,
+        "accepted": 48,
+        "accepted_correct": 46,
+        "accepted_accuracy": 0.9583333333333334,
+        "coverage": 0.6857142857142857,
+        "insufficient_sample": false,
+        "precision": 0.7241379310344828,
+        "recall": 0.9,
+        "f1": 0.8025477707006369,
+        "review_rate": 0.3142857142857143
+      }
+    },
+    "insufficient_sample": false,
+    "insufficient_sample_reason": null,
+    "unmatched_prediction_pairs": 0,
+    "unexpected_prediction_pairs": 0,
+    "missing_prediction_pairs": 0,
+    "conflicting_prediction_pairs": 0,
+    "identical_prediction_duplicates": 0,
+    "quarantined_reference_pairs": 0,
+    "macro_f1": 0.7154235714745268
+  },
+  "unassigned_expected_pairs": 0
+}
