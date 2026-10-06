@@ -80,6 +80,85 @@ OUTPUT_COLUMNS_V2 = [
     "stance_model_name",
 ]
 
+# Per-key-message summary of a run_v2() result; see summarize_v2_by_key_message().
+SUMMARY_COLUMNS_V2 = [
+    "contribution_id",
+    "key_message_id",
+    "key_message",
+    "comments",
+    "in_favor",
+    "against",
+    "neutral",
+    "general_approval",
+    "needs_review",
+    "failed",
+    "contribution_comments",
+    "contribution_general_approval_comments",
+]
+
+
+def summarize_v2_by_key_message(pairs: pd.DataFrame) -> pd.DataFrame:
+    """Count run_v2() outcomes per key message, with contribution-level general approval.
+
+    General approval of the whole contribution is neutral toward each key
+    message (docs/stance_policy_v2.md, option C), so it is counted in its own
+    ``general_approval`` column rather than in ``in_favor``. Per key message
+    the outcome columns are disjoint and sum to ``comments``:
+
+    * ``in_favor`` / ``against``: accepted directional stances.
+    * ``neutral``: accepted neutral stances other than general approval.
+    * ``general_approval``: accepted rows with basis ``general_approval``.
+    * ``needs_review`` / ``failed``: rows without a final stance.
+
+    ``contribution_comments`` and ``contribution_general_approval_comments``
+    repeat on every key message of a contribution. The output has no comment
+    ID, so identical comment texts within one contribution are told apart by
+    their row multiplicity: a text's occurrences are its row count on any key
+    message, and its general-approval comments are the maximum accepted
+    general-approval row count over its key messages. That is exact unless
+    two identical texts in one contribution received general approval on
+    different key messages.
+
+    Args:
+        pairs: A DataFrame with :data:`OUTPUT_COLUMNS_V2`.
+
+    Returns:
+        One row per (contribution_id, key_message_id), with
+        :data:`SUMMARY_COLUMNS_V2`, in first-appearance order.
+
+    Raises:
+        ValueError: If an accepted row has no recognized final stance.
+    """
+    if pairs.empty:
+        return pd.DataFrame(columns=SUMMARY_COLUMNS_V2)
+
+    accepted = pairs["status"] == "accepted"
+    general = accepted & (pairs["basis"] == "general_approval")
+    outcome = pd.Series(None, index=pairs.index, dtype=object)
+    outcome[pairs["status"] == "needs_review"] = "needs_review"
+    outcome[pairs["status"] == "failed"] = "failed"
+    for label in ("in_favor", "against", "neutral"):
+        outcome[accepted & (pairs["final_stance"] == label)] = label
+    outcome[general] = "general_approval"
+    if outcome.isna().any():
+        raise ValueError("Unexpected status/final_stance combination in run_v2 output")
+
+    keys = ["contribution_id", "key_message_id"]
+    frame = pairs[keys + ["key_message", "comment_text"]].assign(outcome=outcome, general=general)
+    counts = pd.crosstab([frame["contribution_id"], frame["key_message_id"]], frame["outcome"])
+    counts = counts.reindex(columns=SUMMARY_COLUMNS_V2[4:10], fill_value=0)
+    counts["comments"] = counts.sum(axis=1)
+
+    per_text = frame.groupby(["contribution_id", "comment_text", "key_message_id"], sort=False).agg(
+        rows=("outcome", "size"), general=("general", "sum"))
+    per_text = per_text.groupby(level=["contribution_id", "comment_text"], sort=False).max()
+    per_contribution = per_text.groupby(level="contribution_id", sort=False).sum().rename(
+        columns={"rows": "contribution_comments", "general": "contribution_general_approval_comments"})
+
+    summary = frame[keys + ["key_message"]].drop_duplicates(keys).join(counts, on=keys)
+    summary = summary.join(per_contribution, on="contribution_id")
+    return summary[SUMMARY_COLUMNS_V2].astype({c: "int64" for c in SUMMARY_COLUMNS_V2[3:]}).reset_index(drop=True)
+
 
 def should_fast_path(label: str, score: float, text: str) -> bool:
     """Decide whether a comment can skip the LLM via the fast path.

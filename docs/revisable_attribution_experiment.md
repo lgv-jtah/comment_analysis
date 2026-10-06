@@ -24,16 +24,16 @@ Multiple targets may have explicit directional stances at once.
 
 | Attribution | Required decision and deterministic treatment |
 | --- | --- |
-| `explicit_target` | Requires `in_favor` or `against` and comment evidence; retains its stance ahead of global approval. Under valid revised general support, `in_favor` whose every quote lies inside the revised scope evidence records `basis=general_approval` instead. |
+| `explicit_target` | Requires `in_favor` or `against` and comment evidence; retains its stance ahead of global approval. Under valid revised general support, `in_favor` whose every quote lies inside the revised scope evidence records `basis=general_approval` with stance `neutral` instead. |
 | `explicit_exclusion` | Requires a stance, including an allowed `neutral`, and comment evidence for the exception; retains its stance ahead of global approval. |
-| `unaddressed` | Allows `neutral` or null from the model; becomes `in_favor` under valid revised general support, otherwise `neutral`. |
+| `unaddressed` | Allows `neutral` or null from the model; stays `neutral`, recorded as `basis=general_approval` under valid revised general support. |
 | `no_position` | Allows `neutral` or null from the model; follows the same inheritance rule as `unaddressed`. |
 | `unresolved` | Always requires review; a non-null proposed stance requires comment evidence and is retained only as a review proposal. |
 
 General support means revised `whole_contribution_approval`, or revised `mixed_qualified` with `general_support_extends_to_unaddressed=true`, supported by nonempty comment evidence.
-Inherited support records `basis=general_approval` with revised scope evidence and explanation; merely omitting a target is not an explicit exclusion.
+Inherited general approval records stance `neutral` and `basis=general_approval` with revised scope evidence and explanation, per the 2026-10-06 decision change in [Stance policy v2](stance_policy_v2.md); merely omitting a target is not an explicit exclusion.
 Models may instead label a blanket approval such as "Stimmt" as `explicit_target`/`in_favor` for every target, quoting the same span.
-Support that quotes only text inside the revised general-support evidence (`policy.restates_general_approval`, whitespace-normalized containment) is therefore recorded as `general_approval` with the scope evidence; the label is unchanged, and the target explanation is kept when nonempty.
+Support that quotes only text inside the revised general-support evidence (`policy.restates_general_approval`, whitespace-normalized containment) is therefore recorded as `general_approval` with stance `neutral`, the scope evidence, and the scope explanation, since the target's explanation of explicit support would contradict the label.
 Any quote outside that evidence, any `against` stance, and any `explicit_exclusion` keep their explicit attribution.
 General rejection never propagates automatically, and topic overlap, sentiment, or confirmation of a problem does not establish support for a solution.
 
@@ -443,7 +443,7 @@ The request settings and budgets below are unchanged by the basis-validation and
 
 Full runs allow 80 expected two-stage calls plus 20 replay calls, with at most three retries per logical call and retry delays capped at 30 seconds, including `Retry-After`.
 The unchanged per-request contract uses temperature `0.1`, `max_tokens=20000`, JSON-schema responses, concurrency one, backend-default reasoning with no thinking override, and no verifier or stage cache.
-The smoke uses one synthetic three-target comment and expects `in_favor`, `against`, `in_favor`; its observed token thresholds remain 1,000,000 completion and 2,000,000 total tokens, not a reduced request limit.
+The smoke uses one synthetic three-target comment and expected `in_favor`, `against`, `in_favor` under the pre-2026-10-06 general-approval rule (a rerun under the current rule would expect `neutral` for the inherited targets); its observed token thresholds remain 1,000,000 completion and 2,000,000 total tokens, not a reduced request limit.
 Logical calls and HTTP attempts are reserved durably before dispatch; HTTP counts include metadata GETs and completion POSTs, including retries, but not unknown proxy-internal attempts.
 The absolute persisted 7,200-second full-run deadline includes downtime and is never reset on resume; the smoke similarly retains its 1,300-second deadline.
 Observed token budgets are soft lower bounds, missing usage remains unknown, and an in-flight request may overshoot; these are not hard billing caps.

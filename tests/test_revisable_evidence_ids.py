@@ -249,7 +249,8 @@ def test_stage2_receives_validated_wire_and_exact_canonical_quotes():
                                  source_evidence_ids=[next(e["id"] for e in ra.build_evidence_table(ctx)
                                                           if e["target_binding"] == ctx.key_messages[0].key_message_id)])
     outputs, handler = run(ctx, [first, second])
-    assert [o.final_stance for o in outputs] == ["against", "in_favor"]
+    assert [o.final_stance for o in outputs] == ["against", "neutral"]
+    assert [o.basis for o in outputs] == ["explicit_target", "general_approval"]
     assert outputs[0].comment_evidence == ["Ja!"] and outputs[0].source_evidence == [" Same source.\r\n"]
     calls = handler.call_model.call_args_list
     prompt = calls[1].kwargs["messages"][0]["content"]

@@ -2,7 +2,7 @@ Analysiere den folgenden Kommentar zu einem Beteiligungsbeitrag und bestimme fü
 
 ## Grundprinzip
 
-Prüfe zuerst, ob der Kommentar eine uneingeschränkte allgemeine Zustimmung zum GESAMTEN Beitrag ausdrückt (z. B. "Super Idee!"). Falls ja: alle Kernaussagen erhalten stance=in_favor, basis=general_approval.
+Prüfe zuerst, ob der Kommentar eine uneingeschränkte allgemeine Zustimmung zum GESAMTEN Beitrag ausdrückt (z. B. "Super Idee!"). Falls ja: alle Kernaussagen erhalten stance=neutral, basis=general_approval -- das ist eine allgemeine Zustimmung zum Beitrag, kein eigener Stance zu einzelnen Kernaussagen.
 
 Andernfalls: bestimme für jede Kernaussage einzeln, ob der Kommentar sie explizit adressiert (basis=explicit_target, stance=in_favor oder against je nach Zustimmung/Widerspruch) oder nicht (basis=unaddressed, stance=neutral), oder sie zwar berührt aber keine Position bezieht (basis=no_position, stance=neutral).
 

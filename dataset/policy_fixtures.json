@@ -3,24 +3,24 @@
     "fixture_id": "policy_fixture_01",
     "comment_text": "Super Idee!",
     "expected": {
-      "bicycle_stands": "in_favor",
-      "remove_parking": "in_favor",
-      "plant_trees": "in_favor"
+      "bicycle_stands": "neutral",
+      "remove_parking": "neutral",
+      "plant_trees": "neutral"
     },
     "basis": "general_approval",
-    "note": "General approval; all three in_favor.",
+    "note": "General approval of the contribution; all three neutral with basis general_approval.",
     "label_source": "policy_derived"
   },
   {
     "fixture_id": "policy_fixture_02",
     "comment_text": "Danke, ja!",
     "expected": {
-      "bicycle_stands": "in_favor",
-      "remove_parking": "in_favor",
-      "plant_trees": "in_favor"
+      "bicycle_stands": "neutral",
+      "remove_parking": "neutral",
+      "plant_trees": "neutral"
     },
     "basis": "general_approval",
-    "note": "General approval when directly addressed to the contribution; all three in_favor.",
+    "note": "General approval when directly addressed to the contribution; all three neutral with basis general_approval.",
     "label_source": "policy_derived"
   },
   {
@@ -39,12 +39,12 @@
     "fixture_id": "policy_fixture_04",
     "comment_text": "Ich unterstütze den gesamten Vorschlag, nur die Parkplätze sollten bleiben.",
     "expected": {
-      "bicycle_stands": "in_favor",
+      "bicycle_stands": "neutral",
       "remove_parking": "against",
-      "plant_trees": "in_favor"
+      "plant_trees": "neutral"
     },
     "basis": "mixed_qualified",
-    "note": "Parking removal against; bicycle stands and trees in_favor.",
+    "note": "Parking removal against (explicit_target); bicycle stands and trees neutral with basis general_approval (scope extends).",
     "label_source": "policy_derived"
   },
   {

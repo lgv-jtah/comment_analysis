@@ -96,7 +96,8 @@ def test_experimental_runner_routes_and_never_leaks_annotations(monkeypatch):
     result = asyncio.run(benchmark.run_benchmark(source=source(), base_url="unused", model_name="mock",
                                                  verify_ionos=False, mode="revisable_attribution", limit=1))
     assert len(result) == 2
-    assert set(result.final_stance) == {"in_favor"}
+    assert set(result.final_stance) == {"neutral"}
+    assert set(result.basis) == {"general_approval"}
     for call in calls:
         prompt = call["messages"][0]["content"]
         assert "SECRET_GOLD" not in prompt and "ANNOTATION_NOTE" not in prompt

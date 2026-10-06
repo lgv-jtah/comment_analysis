@@ -2,9 +2,10 @@
 
 This document defines the stance-detection policy implemented by
 `policy.py`'s `StancePolicyEngineV2`. It follows
-`STANCE_PIPELINE_IMPLEMENTATION_BRIEF.md` section 4 and is the reference
-both for prompt wording and for reviewing the deterministic orchestration
-code.
+`STANCE_PIPELINE_IMPLEMENTATION_BRIEF.md` section 4, amended by the
+[2026-10-06 decision change](#decision-change-2026-10-06-general-approval-is-contribution-level)
+on general approval, and is the reference both for prompt wording and for
+reviewing the deterministic orchestration code.
 
 ## Canonical labels
 
@@ -31,10 +32,13 @@ Internal v2 code never compares against a legacy string directly.
    phase, no parent/reply-linkage data source exists in the pipeline --
    see "Known limitation: parent context" below.)
 3. Identify whether the comment contains unqualified approval of the entire
-   contribution. If so, assign `in_favor` to every key message and record
-   `general_approval` as the basis.
+   contribution. If so, record `general_approval` as the basis for every key
+   message, with stance `neutral`: general approval is a contribution-level
+   signal, not a position on any single key message (see the decision
+   change below). Reports count it separately
+   (`whole_process.summarize_v2_by_key_message`).
 4. For qualified or mixed approval, explicit target-specific positions take
-   precedence. Apply general support to other messages only when the scope
+   precedence. Mark other messages as general approval only when the scope
    really covers the contribution; otherwise assess them independently.
    Flag ambiguous scope.
 5. For targeted comments, classify every addressed proposition separately.
@@ -55,7 +59,7 @@ establish opposition even without explicit disagreement words.
 ## Synthetic policy examples (tests, not evaluation gold)
 
 Assume three key messages: add bicycle stands; remove car parking spaces;
-plant trees. These are implemented verbatim as `label_source=policy_derived`
+plant trees. These are implemented as `label_source=policy_derived`
 fixtures in `dataset_builder.build_policy_fixtures()` -- they validate the
 policy engine's behavior, they are never merged into `dataset/pairs.parquet`
 (which holds only `human_gold` rows), and they are never treated as an
@@ -63,10 +67,10 @@ independently human-validated accuracy result.
 
 | Comment | Expected interpretation |
 | --- | --- |
-| "Super Idee!" | General approval; all three `in_favor`. |
-| "Danke, ja!" | General approval when directly addressed to the contribution; all three `in_favor`. |
+| "Super Idee!" | General approval; all three `neutral` with basis `general_approval`. |
+| "Danke, ja!" | General approval when directly addressed to the contribution; all three `neutral` with basis `general_approval`. |
 | "Endlich mehr Fahrradständer!" | Bicycle stands `in_favor`; other messages `neutral`. |
-| "Ich unterstütze den gesamten Vorschlag, nur die Parkplätze sollten bleiben." | Parking removal `against`; bicycle stands and trees `in_favor`. |
+| "Ich unterstütze den gesamten Vorschlag, nur die Parkplätze sollten bleiben." | Parking removal `against`; bicycle stands and trees `neutral` with basis `general_approval`. |
 | "Gute Idee mit den Fahrradständern, aber die Parkplätze sollten bleiben." | Bicycle stands `in_favor`; parking removal `against`; trees `neutral`. |
 | "Siehe oben." without resolvable context | Review; do not infer approval. |
 | "Na klar, noch mehr Autos. Großartige Idee …" | Potential sarcasm; review when unresolved. |
@@ -103,11 +107,14 @@ comment, then applies the general-approval rule deterministically in code
 Basis records provenance, not just the label. Under `mixed_qualified` with
 `general_support_extends_to_unaddressed=true`, an `in_favor` target whose
 every comment quote lies inside the scope's general-support evidence
-(`restates_general_approval`) is recorded as `general_approval`, not
-`explicit_target`: it adds nothing target-specific. Without this, blanket
-approvals quoted per target hide the general-approval/historical-label
-divergence inside the `explicit_target` row of the reporting rule below.
-The revisable-attribution engine applies the same rule.
+(`restates_general_approval`) is recorded as `general_approval` with stance
+`neutral`, not `explicit_target`: it adds nothing target-specific. Models
+often label a blanket "Stimmt" as explicit support for every key message,
+quoting the same span each time; without this rule those comments would
+count as targeted support. The revisable-attribution engine applies the
+same rule. The one-call engine takes the basis from the model and applies
+the general-approval stance in code; a `general_approval` basis with
+`against` is contradictory and routes to review.
 
 Failed or invalid LLM output (wrong enum, a key-message ID that doesn't
 exist in this comment's context, evidence that isn't an exact substring of
@@ -117,9 +124,67 @@ the comment or its key message's related sentences) never becomes a silent
 
 An optional verifier stage makes one independent assessment of the same
 context (never shown the primary's answer, no recursive loop) and routes to
-review on any scope or per-target disagreement.
+review on any per-target disagreement in final stance or in whether the
+basis is `general_approval`. General approval and an unaddressed message are
+both `neutral`, so comparing stance alone would no longer detect that scope
+disagreement.
+
+## Decision change 2026-10-06: general approval is contribution-level
+
+The brief's rule 1 ("Unqualified general approval of a contribution counts
+as IN FAVOR for every key message") is replaced: general approval is
+recorded with `basis=general_approval` and stance `neutral` on each key
+message, and reported as a separate contribution-level count (option C of
+the 2026-10-06 gap investigation). The brief itself is left unchanged as
+the historical record.
+
+Reasons:
+
+- The annotator's notes (`stance_evaluations.comment` in
+  `evaluation_data/evaluations_backup20260922.sq3`) name the category
+  explicitly -- "generelle zustimmende Reaktion auf alle Keymessages",
+  "allgemeine zustimmende Reaktion, also neutraler Stance". The annotation
+  tool offered no general-approval label, so she mostly scored those pairs
+  `neutral` per key message: on the 84 pairs carrying such a note, 49 are
+  `neutral`, 18 `in_favor`, and 17 unresolved. Where the legacy model said
+  `in_favor` for "Warum nicht!" or "Klingt smart! …", she marked it
+  incorrect and corrected it to `neutral`. The labels are not fully
+  consistent (some notes say "definitiv nicht neutral"), so this is the
+  majority convention, not a unanimous one.
+- Under the old rule the 80% goal was unreachable on the historical
+  cohort: on the 119 eligible pairs of the 2026-09-29 model comparison, 28
+  blanket-approval pairs are labelled `neutral`, capping a perfectly
+  policy-compliant pipeline at (119 − 28) / 119 = 76.5%.
+- Per-key-message counts are what planners read. Under the old rule a
+  two-word "Warum nicht!" on a five-message contribution added five
+  supports, as much as five targeted arguments. The legacy fast path
+  already used the same convention ("Allgemeine positive Reaktion -- per
+  KM neutral, Kommentar-Level positiv").
+
+No information is lost: `basis=general_approval` marks every such row, and
+`whole_process.summarize_v2_by_key_message` (written as
+`<output>_summary.parquet` by menu option 13) reports per key message the
+disjoint counts `in_favor`, `against`, `neutral`, `general_approval`,
+`needs_review` and `failed`, plus each contribution's
+`contribution_general_approval_comments`.
+
+The offline simulation on saved predictions (`basis_rescore.py`, no new
+inference) puts GPT-OSS-120B at 65-82 of 119 correct automatic answers
+under this rule, compared with 63 under the old one; the range comes from
+not knowing the model's scope on saved rows. The rule was chosen after
+inspecting this development cohort, so these numbers are indicative, not
+held-out results; fresh runs are required for reportable figures.
+
+General rejection ("Bitte nicht.", noted by the annotator as "allgemeine
+ablehnende Reaktion") is unchanged by this decision: rule 7 still applies,
+and a symmetric contribution-level marker is a separate, later step.
 
 ## Reporting: general-approval accuracy against historical labels
+
+*Historical context: this section was written under the superseded rule
+(general approval = `in_favor`). With general approval now `neutral`, the
+divergence it describes largely disappears, but the reporting rule -- always
+show the basis breakdown next to the blended number -- still applies.*
 
 Brief section 3: "Existing annotations do not fully match the new
 general-approval policy. Report results against historical labels

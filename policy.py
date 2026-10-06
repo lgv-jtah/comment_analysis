@@ -38,6 +38,12 @@ from stance_detector import StanceDetector
 
 POLICY_VERSION = "v2"
 
+# Option C (decision change 2026-10-06, docs/stance_policy_v2.md): general
+# approval of the whole contribution is reported as a contribution-level
+# signal via basis="general_approval", not as support for each key message.
+# Every general_approval row therefore carries this stance.
+GENERAL_APPROVAL_STANCE = StanceLabelV2.NEUTRAL
+
 PairStatus = Literal["accepted", "needs_review", "failed"]
 
 DEFAULT_PROMPT_CONFIG_PATH = "./prompts/config.json"
@@ -379,7 +385,7 @@ class StancePolicyEngineV2:
         if scope.scope_type == ScopeType.WHOLE_CONTRIBUTION_APPROVAL:
             for km in kms:
                 outputs[km.key_message_id] = _accepted(
-                    context, km, StanceLabelV2.IN_FAVOR, "general_approval",
+                    context, km, GENERAL_APPROVAL_STANCE, "general_approval",
                     scope.comment_evidence, [], scope.explanation,
                 )
             return outputs
@@ -417,6 +423,7 @@ class StancePolicyEngineV2:
                             )
                             continue
                         evidence = target.comment_evidence
+                        stance = target.stance
                         if target.stance == StanceLabelV2.NEUTRAL:
                             basis = target.neutral_basis.value if target.neutral_basis else NeutralBasis.NO_POSITION.value
                         elif (
@@ -426,10 +433,11 @@ class StancePolicyEngineV2:
                             and restates_general_approval(target.comment_evidence, scope.comment_evidence)
                         ):
                             basis, evidence = "general_approval", scope.comment_evidence
+                            stance = GENERAL_APPROVAL_STANCE
                         else:
                             basis = "explicit_target"
                         outputs[km.key_message_id] = _accepted(
-                            context, km, target.stance, basis,
+                            context, km, stance, basis,
                             evidence, target.source_evidence, target.explanation,
                         )
 
@@ -438,7 +446,7 @@ class StancePolicyEngineV2:
                 continue
             if scope.scope_type == ScopeType.MIXED_QUALIFIED and scope.general_support_extends_to_unaddressed:
                 outputs[km.key_message_id] = _accepted(
-                    context, km, StanceLabelV2.IN_FAVOR, "general_approval",
+                    context, km, GENERAL_APPROVAL_STANCE, "general_approval",
                     scope.comment_evidence, [], scope.explanation,
                 )
             else:
@@ -477,7 +485,12 @@ class StancePolicyEngineV2:
                 v = verifier.get(km.key_message_id)
                 if p is None or v is None:
                     continue
-                if p.status == "accepted" and v.status == "accepted" and p.final_stance != v.final_stance:
+                if p.status == "accepted" and v.status == "accepted" and (
+                    p.final_stance != v.final_stance
+                    # General approval and an unaddressed message are both
+                    # neutral now; disagreeing on that is still a disagreement.
+                    or (p.basis == "general_approval") != (v.basis == "general_approval")
+                ):
                     primary[km.key_message_id] = _needs_review(
                         context, km, ["verifier_disagreement"]
                     )
@@ -598,11 +611,18 @@ class OneCallPolicyEngineV2:
             return [_needs_review(context, km, ["invalid_one_call_output"] + errors) for km in kms]
 
         by_id = {t.key_message_id: t for t in result.targets}
+        if any(t.basis.value == "general_approval" and t.stance == StanceLabelV2.AGAINST
+               for t in by_id.values()):
+            return [_needs_review(context, km, ["invalid_one_call_output", "general_approval_with_against"])
+                    for km in kms]
+        # The model decides the basis; the general-approval stance is applied
+        # in code, as in the two-stage engine.
         return [
             _accepted(
                 context,
                 km,
-                by_id[km.key_message_id].stance,
+                GENERAL_APPROVAL_STANCE if by_id[km.key_message_id].basis.value == "general_approval"
+                else by_id[km.key_message_id].stance,
                 by_id[km.key_message_id].basis.value,
                 by_id[km.key_message_id].comment_evidence,
                 [],

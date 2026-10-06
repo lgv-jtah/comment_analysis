@@ -117,8 +117,11 @@ def test_general_approval_reaches_every_key_message(monkeypatch):
 
     assert len(results) == 2
     assert all(r.status == "accepted" for r in results)
-    assert all(r.final_stance == "in_favor" for r in results)
+    # Option C: general approval is a contribution-level signal, not support
+    # for each key message.
+    assert all(r.final_stance == "neutral" for r in results)
     assert all(r.basis == "general_approval" for r in results)
+    assert all(r.comment_evidence == ["Super Idee!"] for r in results)
 
 
 # ---------------------------------------------------------------------------
@@ -200,8 +203,8 @@ def test_mixed_qualified_explicit_exception_overrides_general_support(monkeypatc
     # Explicit exception: parking removal is opposed.
     assert by_id[km2_id].final_stance == "against"
     assert by_id[km2_id].basis == "explicit_target"
-    # General support extends to the unaddressed key message.
-    assert by_id[km1_id].final_stance == "in_favor"
+    # General support extends to the unaddressed key message as a marker.
+    assert by_id[km1_id].final_stance == "neutral"
     assert by_id[km1_id].basis == "general_approval"
 
 
@@ -271,7 +274,7 @@ def _mixed_extension_engine(monkeypatch, target_evidence, stance="in_favor"):
 def test_mixed_qualified_support_quoting_only_general_evidence_is_general_approval(monkeypatch):
     result = _mixed_extension_engine(monkeypatch, ["Stimmt."])
 
-    assert result.final_stance == "in_favor"
+    assert result.final_stance == "neutral"
     assert result.basis == "general_approval"
     assert result.comment_evidence == ["Stimmt."]
 
@@ -279,6 +282,7 @@ def test_mixed_qualified_support_quoting_only_general_evidence_is_general_approv
 def test_mixed_qualified_target_specific_evidence_stays_explicit(monkeypatch):
     result = _mixed_extension_engine(monkeypatch, ["Stimmt.", "mehr Fahrradständer wären toll"])
 
+    assert result.final_stance == "in_favor"
     assert result.basis == "explicit_target"
 
 
@@ -664,8 +668,9 @@ def test_verifier_disagreement_routes_to_review(monkeypatch):
     engine = _make_engine(monkeypatch, call_model, verifier_enabled=True)
     results = _run(engine, context)
 
-    # Primary said in_favor via general_approval; verifier's target_specific
-    # pass (no affected ids) leaves both KMs neutral -- disagreement on both.
+    # Both passes end neutral, but the primary records general approval and the
+    # verifier's target_specific pass (no affected ids) records unaddressed --
+    # a provenance disagreement on both.
     assert all(r.status == "needs_review" for r in results)
     assert all("verifier_disagreement" in r.review_reasons for r in results)
 
@@ -680,7 +685,7 @@ def test_verifier_agreement_keeps_accepted_result(monkeypatch):
     results = _run(engine, context)
 
     assert all(r.status == "accepted" for r in results)
-    assert all(r.final_stance == "in_favor" for r in results)
+    assert all(r.final_stance == "neutral" and r.basis == "general_approval" for r in results)
 
 
 # ---------------------------------------------------------------------------
@@ -730,9 +735,28 @@ def test_one_call_general_approval_reaches_every_key_message(monkeypatch):
     engine = _make_one_call_engine(monkeypatch, call_model)
     results = _run(engine, context)
 
+    # The model's in_favor is overridden in code: general approval is neutral.
     assert all(r.status == "accepted" for r in results)
-    assert all(r.final_stance == "in_favor" for r in results)
+    assert all(r.final_stance == "neutral" for r in results)
     assert all(r.basis == "general_approval" for r in results)
+
+
+def test_one_call_general_approval_with_against_routes_to_review(monkeypatch):
+    context = _context(comment_text="Super Idee!")
+    km1_id, km2_id = [km.key_message_id for km in context.key_messages]
+
+    async def call_model(*, response_schema, **kwargs):
+        return _one_call_response([
+            {"key_message_id": km1_id, "stance": "against", "basis": "general_approval",
+             "comment_evidence": ["Super Idee!"], "explanation": ""},
+            {"key_message_id": km2_id, "stance": "neutral", "basis": "general_approval",
+             "comment_evidence": ["Super Idee!"], "explanation": ""},
+        ])
+
+    results = _run(_make_one_call_engine(monkeypatch, call_model), context)
+
+    assert all(r.status == "needs_review" and r.final_stance is None for r in results)
+    assert all("general_approval_with_against" in r.review_reasons for r in results)
 
 
 def test_one_call_mixed_targets(monkeypatch):

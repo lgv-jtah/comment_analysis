@@ -7,7 +7,13 @@ exactly. Two reconstruction tiers, reported separately:
   inferred: no general_approval row, >=2 targets, every target explicit_target /
             in_favor with the same nonempty evidence; general support with that
             shared evidence is assumed (a blanket approval quoted per target).
-Labels never change, only basis/evidence, so headline accuracy is invariant.
+The basis relabelling alone never changes labels, so headline accuracy is invariant.
+
+Option C (2026-10-06 decision, docs/stance_policy_v2.md) then sets every
+general_approval row's stance to neutral, as the current engines do. Reported
+for the exact tier alone (lower bound of the change) and exact+inferred (upper
+bound). The rule was chosen after inspecting this cohort, so these are
+development-set simulations, not held-out results.
 """
 import hashlib
 import json
@@ -20,7 +26,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from evaluator_v2 import accepted_accuracy_by_basis, evaluate  # noqa: E402
-from policy import restates_general_approval  # noqa: E402
+from policy import GENERAL_APPROVAL_STANCE, restates_general_approval  # noqa: E402
 
 EXP = ROOT / "dataset/experiments"
 RUNS = {
@@ -59,6 +65,18 @@ def relabel(pred):
     return pred
 
 
+def option_c(pred, tiers=("exact", "inferred")):
+    """Apply option C to relabelled rows: general approval is neutral per key message."""
+    pred = pred.copy()
+    keep = pred.basis == "general_approval"
+    keep &= pred.rescore_tier.isna() | pred.rescore_tier.isin(tiers)
+    revert = (pred.basis == "general_approval") & ~keep
+    pred.loc[revert, "basis"] = "explicit_target"
+    for column in ("proposed_stance", "final_stance"):
+        pred.loc[keep & pred[column].notna(), column] = GENERAL_APPROVAL_STANCE.value
+    return pred
+
+
 def by_basis(pred, ref, expected, tiers):
     return {k: {"correct": v.correct, "n": v.n, "accuracy": round(v.accuracy, 4)}
             for k, v in sorted(accepted_accuracy_by_basis(pred, ref, expected, tiers=tiers).items())}
@@ -87,7 +105,17 @@ def main():
                 "eligible_pairs": after.eligible_pairs,
                 "by_basis_before": by_basis(pred, ref, expected, tiers),
                 "by_basis_after": by_basis(new, ref, expected, tiers),
+                "option_c": {},
             }
+            for bound, relabel_tiers in (("exact_only", ("exact",)), ("exact_and_inferred", ("exact", "inferred"))):
+                simulated = option_c(new, relabel_tiers)
+                metrics = evaluate(simulated, ref, expected, tiers=tiers)
+                run[label]["option_c"][bound] = {
+                    "accepted_correct": metrics.accepted_correct, "accepted_pairs": metrics.accepted_pairs,
+                    "eligible_pairs": metrics.eligible_pairs,
+                    "correct_automatic_yield": round(metrics.accepted_correct / metrics.eligible_pairs, 4),
+                    "by_basis": by_basis(simulated, ref, expected, tiers),
+                }
         changed = new[new.rescore_tier.notna()]
         run["relabelled_rows"] = {"total": len(changed), **changed.rescore_tier.value_counts().to_dict()}
         run["relabelled_comments"] = int(changed.groupby(["contribution_id", "comment_text"]).ngroups)
@@ -104,6 +132,9 @@ def main():
             b, a = ab["by_basis_before"].get(key), ab["by_basis_after"].get(key)
             fmt = lambda m: f"{m['correct']}/{m['n']} ({m['accuracy']:.3f})" if m else "-"
             print(f"  {key:20s} before {fmt(b):18s} after {fmt(a)}")
+        for bound, metrics in ab["option_c"].items():
+            print(f"  option C ({bound}): {metrics['accepted_correct']}/{metrics['eligible_pairs']} "
+                  f"correct automatic ({metrics['correct_automatic_yield']:.3f})")
 
 
 if __name__ == "__main__":

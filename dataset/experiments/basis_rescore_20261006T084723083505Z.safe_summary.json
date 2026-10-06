@@ -1,0 +1,722 @@
+{
+  "created_utc": "20261006T084723083505Z",
+  "analysis_only": true,
+  "new_inference_requests": 0,
+  "method": "Offline basis re-score (usage: uv run python basis_rescore.py) of saved policy-v2 predictions. No inference, no network.\n\nSaved rows do not record the revised scope, so the engine rule cannot be replayed\nexactly. Two reconstruction tiers, reported separately:\n  exact:    the comment already has a general_approval row, so general support and\n            its evidence are observed; the engine rule is applied verbatim.\n  inferred: no general_approval row, >=2 targets, every target explicit_target /\n            in_favor with the same nonempty evidence; general support with that\n            shared evidence is assumed (a blanket approval quoted per target).\nThe basis relabelling alone never changes labels, so headline accuracy is invariant.\n\nOption C (2026-10-06 decision, docs/stance_policy_v2.md) then sets every\ngeneral_approval row's stance to neutral, as the current engines do. Reported\nfor the exact tier alone (lower bound of the change) and exact+inferred (upper\nbound). The rule was chosen after inspecting this cohort, so these are\ndevelopment-set simulations, not held-out results.",
+  "runs": {
+    "gpt": {
+      "primary_A": {
+        "accepted_correct": 63,
+        "accepted_pairs": 103,
+        "eligible_pairs": 117,
+        "by_basis_before": {
+          "explicit_exclusion": {
+            "correct": 2,
+            "n": 2,
+            "accuracy": 1.0
+          },
+          "explicit_target": {
+            "correct": 35,
+            "n": 66,
+            "accuracy": 0.5303
+          },
+          "general_approval": {
+            "correct": 0,
+            "n": 1,
+            "accuracy": 0.0
+          },
+          "no_position": {
+            "correct": 1,
+            "n": 3,
+            "accuracy": 0.3333
+          },
+          "unaddressed": {
+            "correct": 25,
+            "n": 31,
+            "accuracy": 0.8065
+          }
+        },
+        "by_basis_after": {
+          "explicit_exclusion": {
+            "correct": 2,
+            "n": 2,
+            "accuracy": 1.0
+          },
+          "explicit_target": {
+            "correct": 27,
+            "n": 31,
+            "accuracy": 0.871
+          },
+          "general_approval": {
+            "correct": 8,
+            "n": 36,
+            "accuracy": 0.2222
+          },
+          "no_position": {
+            "correct": 1,
+            "n": 3,
+            "accuracy": 0.3333
+          },
+          "unaddressed": {
+            "correct": 25,
+            "n": 31,
+            "accuracy": 0.8065
+          }
+        },
+        "option_c": {
+          "exact_only": {
+            "accepted_correct": 65,
+            "accepted_pairs": 103,
+            "eligible_pairs": 117,
+            "correct_automatic_yield": 0.5556,
+            "by_basis": {
+              "explicit_exclusion": {
+                "correct": 2,
+                "n": 2,
+                "accuracy": 1.0
+              },
+              "explicit_target": {
+                "correct": 35,
+                "n": 65,
+                "accuracy": 0.5385
+              },
+              "general_approval": {
+                "correct": 2,
+                "n": 2,
+                "accuracy": 1.0
+              },
+              "no_position": {
+                "correct": 1,
+                "n": 3,
+                "accuracy": 0.3333
+              },
+              "unaddressed": {
+                "correct": 25,
+                "n": 31,
+                "accuracy": 0.8065
+              }
+            }
+          },
+          "exact_and_inferred": {
+            "accepted_correct": 82,
+            "accepted_pairs": 103,
+            "eligible_pairs": 117,
+            "correct_automatic_yield": 0.7009,
+            "by_basis": {
+              "explicit_exclusion": {
+                "correct": 2,
+                "n": 2,
+                "accuracy": 1.0
+              },
+              "explicit_target": {
+                "correct": 27,
+                "n": 31,
+                "accuracy": 0.871
+              },
+              "general_approval": {
+                "correct": 27,
+                "n": 36,
+                "accuracy": 0.75
+              },
+              "no_position": {
+                "correct": 1,
+                "n": 3,
+                "accuracy": 0.3333
+              },
+              "unaddressed": {
+                "correct": 25,
+                "n": 31,
+                "accuracy": 0.8065
+              }
+            }
+          }
+        }
+      },
+      "primary_AB": {
+        "accepted_correct": 63,
+        "accepted_pairs": 104,
+        "eligible_pairs": 119,
+        "by_basis_before": {
+          "explicit_exclusion": {
+            "correct": 2,
+            "n": 2,
+            "accuracy": 1.0
+          },
+          "explicit_target": {
+            "correct": 35,
+            "n": 66,
+            "accuracy": 0.5303
+          },
+          "general_approval": {
+            "correct": 0,
+            "n": 1,
+            "accuracy": 0.0
+          },
+          "no_position": {
+            "correct": 1,
+            "n": 3,
+            "accuracy": 0.3333
+          },
+          "unaddressed": {
+            "correct": 25,
+            "n": 32,
+            "accuracy": 0.7812
+          }
+        },
+        "by_basis_after": {
+          "explicit_exclusion": {
+            "correct": 2,
+            "n": 2,
+            "accuracy": 1.0
+          },
+          "explicit_target": {
+            "correct": 27,
+            "n": 31,
+            "accuracy": 0.871
+          },
+          "general_approval": {
+            "correct": 8,
+            "n": 36,
+            "accuracy": 0.2222
+          },
+          "no_position": {
+            "correct": 1,
+            "n": 3,
+            "accuracy": 0.3333
+          },
+          "unaddressed": {
+            "correct": 25,
+            "n": 32,
+            "accuracy": 0.7812
+          }
+        },
+        "option_c": {
+          "exact_only": {
+            "accepted_correct": 65,
+            "accepted_pairs": 104,
+            "eligible_pairs": 119,
+            "correct_automatic_yield": 0.5462,
+            "by_basis": {
+              "explicit_exclusion": {
+                "correct": 2,
+                "n": 2,
+                "accuracy": 1.0
+              },
+              "explicit_target": {
+                "correct": 35,
+                "n": 65,
+                "accuracy": 0.5385
+              },
+              "general_approval": {
+                "correct": 2,
+                "n": 2,
+                "accuracy": 1.0
+              },
+              "no_position": {
+                "correct": 1,
+                "n": 3,
+                "accuracy": 0.3333
+              },
+              "unaddressed": {
+                "correct": 25,
+                "n": 32,
+                "accuracy": 0.7812
+              }
+            }
+          },
+          "exact_and_inferred": {
+            "accepted_correct": 82,
+            "accepted_pairs": 104,
+            "eligible_pairs": 119,
+            "correct_automatic_yield": 0.6891,
+            "by_basis": {
+              "explicit_exclusion": {
+                "correct": 2,
+                "n": 2,
+                "accuracy": 1.0
+              },
+              "explicit_target": {
+                "correct": 27,
+                "n": 31,
+                "accuracy": 0.871
+              },
+              "general_approval": {
+                "correct": 27,
+                "n": 36,
+                "accuracy": 0.75
+              },
+              "no_position": {
+                "correct": 1,
+                "n": 3,
+                "accuracy": 0.3333
+              },
+              "unaddressed": {
+                "correct": 25,
+                "n": 32,
+                "accuracy": 0.7812
+              }
+            }
+          }
+        }
+      },
+      "relabelled_rows": {
+        "total": 40,
+        "inferred": 39,
+        "exact": 1
+      },
+      "relabelled_comments": 11
+    },
+    "qwen_partial": {
+      "primary_A": {
+        "accepted_correct": 14,
+        "accepted_pairs": 29,
+        "eligible_pairs": 117,
+        "by_basis_before": {
+          "explicit_exclusion": {
+            "correct": 1,
+            "n": 1,
+            "accuracy": 1.0
+          },
+          "explicit_target": {
+            "correct": 7,
+            "n": 22,
+            "accuracy": 0.3182
+          },
+          "unaddressed": {
+            "correct": 6,
+            "n": 6,
+            "accuracy": 1.0
+          }
+        },
+        "by_basis_after": {
+          "explicit_exclusion": {
+            "correct": 1,
+            "n": 1,
+            "accuracy": 1.0
+          },
+          "explicit_target": {
+            "correct": 7,
+            "n": 10,
+            "accuracy": 0.7
+          },
+          "general_approval": {
+            "correct": 0,
+            "n": 12,
+            "accuracy": 0.0
+          },
+          "unaddressed": {
+            "correct": 6,
+            "n": 6,
+            "accuracy": 1.0
+          }
+        },
+        "option_c": {
+          "exact_only": {
+            "accepted_correct": 14,
+            "accepted_pairs": 29,
+            "eligible_pairs": 117,
+            "correct_automatic_yield": 0.1197,
+            "by_basis": {
+              "explicit_exclusion": {
+                "correct": 1,
+                "n": 1,
+                "accuracy": 1.0
+              },
+              "explicit_target": {
+                "correct": 7,
+                "n": 22,
+                "accuracy": 0.3182
+              },
+              "unaddressed": {
+                "correct": 6,
+                "n": 6,
+                "accuracy": 1.0
+              }
+            }
+          },
+          "exact_and_inferred": {
+            "accepted_correct": 26,
+            "accepted_pairs": 29,
+            "eligible_pairs": 117,
+            "correct_automatic_yield": 0.2222,
+            "by_basis": {
+              "explicit_exclusion": {
+                "correct": 1,
+                "n": 1,
+                "accuracy": 1.0
+              },
+              "explicit_target": {
+                "correct": 7,
+                "n": 10,
+                "accuracy": 0.7
+              },
+              "general_approval": {
+                "correct": 12,
+                "n": 12,
+                "accuracy": 1.0
+              },
+              "unaddressed": {
+                "correct": 6,
+                "n": 6,
+                "accuracy": 1.0
+              }
+            }
+          }
+        }
+      },
+      "primary_AB": {
+        "accepted_correct": 14,
+        "accepted_pairs": 29,
+        "eligible_pairs": 119,
+        "by_basis_before": {
+          "explicit_exclusion": {
+            "correct": 1,
+            "n": 1,
+            "accuracy": 1.0
+          },
+          "explicit_target": {
+            "correct": 7,
+            "n": 22,
+            "accuracy": 0.3182
+          },
+          "unaddressed": {
+            "correct": 6,
+            "n": 6,
+            "accuracy": 1.0
+          }
+        },
+        "by_basis_after": {
+          "explicit_exclusion": {
+            "correct": 1,
+            "n": 1,
+            "accuracy": 1.0
+          },
+          "explicit_target": {
+            "correct": 7,
+            "n": 10,
+            "accuracy": 0.7
+          },
+          "general_approval": {
+            "correct": 0,
+            "n": 12,
+            "accuracy": 0.0
+          },
+          "unaddressed": {
+            "correct": 6,
+            "n": 6,
+            "accuracy": 1.0
+          }
+        },
+        "option_c": {
+          "exact_only": {
+            "accepted_correct": 14,
+            "accepted_pairs": 29,
+            "eligible_pairs": 119,
+            "correct_automatic_yield": 0.1176,
+            "by_basis": {
+              "explicit_exclusion": {
+                "correct": 1,
+                "n": 1,
+                "accuracy": 1.0
+              },
+              "explicit_target": {
+                "correct": 7,
+                "n": 22,
+                "accuracy": 0.3182
+              },
+              "unaddressed": {
+                "correct": 6,
+                "n": 6,
+                "accuracy": 1.0
+              }
+            }
+          },
+          "exact_and_inferred": {
+            "accepted_correct": 26,
+            "accepted_pairs": 29,
+            "eligible_pairs": 119,
+            "correct_automatic_yield": 0.2185,
+            "by_basis": {
+              "explicit_exclusion": {
+                "correct": 1,
+                "n": 1,
+                "accuracy": 1.0
+              },
+              "explicit_target": {
+                "correct": 7,
+                "n": 10,
+                "accuracy": 0.7
+              },
+              "general_approval": {
+                "correct": 12,
+                "n": 12,
+                "accuracy": 1.0
+              },
+              "unaddressed": {
+                "correct": 6,
+                "n": 6,
+                "accuracy": 1.0
+              }
+            }
+          }
+        }
+      },
+      "relabelled_rows": {
+        "total": 12,
+        "inferred": 12
+      },
+      "relabelled_comments": 3
+    },
+    "nemo": {
+      "primary_A": {
+        "accepted_correct": 51,
+        "accepted_pairs": 75,
+        "eligible_pairs": 117,
+        "by_basis_before": {
+          "explicit_exclusion": {
+            "correct": 1,
+            "n": 1,
+            "accuracy": 1.0
+          },
+          "explicit_target": {
+            "correct": 23,
+            "n": 36,
+            "accuracy": 0.6389
+          },
+          "no_position": {
+            "correct": 15,
+            "n": 21,
+            "accuracy": 0.7143
+          },
+          "unaddressed": {
+            "correct": 12,
+            "n": 17,
+            "accuracy": 0.7059
+          }
+        },
+        "by_basis_after": {
+          "explicit_exclusion": {
+            "correct": 1,
+            "n": 1,
+            "accuracy": 1.0
+          },
+          "explicit_target": {
+            "correct": 18,
+            "n": 27,
+            "accuracy": 0.6667
+          },
+          "general_approval": {
+            "correct": 5,
+            "n": 9,
+            "accuracy": 0.5556
+          },
+          "no_position": {
+            "correct": 15,
+            "n": 21,
+            "accuracy": 0.7143
+          },
+          "unaddressed": {
+            "correct": 12,
+            "n": 17,
+            "accuracy": 0.7059
+          }
+        },
+        "option_c": {
+          "exact_only": {
+            "accepted_correct": 51,
+            "accepted_pairs": 75,
+            "eligible_pairs": 117,
+            "correct_automatic_yield": 0.4359,
+            "by_basis": {
+              "explicit_exclusion": {
+                "correct": 1,
+                "n": 1,
+                "accuracy": 1.0
+              },
+              "explicit_target": {
+                "correct": 23,
+                "n": 36,
+                "accuracy": 0.6389
+              },
+              "no_position": {
+                "correct": 15,
+                "n": 21,
+                "accuracy": 0.7143
+              },
+              "unaddressed": {
+                "correct": 12,
+                "n": 17,
+                "accuracy": 0.7059
+              }
+            }
+          },
+          "exact_and_inferred": {
+            "accepted_correct": 50,
+            "accepted_pairs": 75,
+            "eligible_pairs": 117,
+            "correct_automatic_yield": 0.4274,
+            "by_basis": {
+              "explicit_exclusion": {
+                "correct": 1,
+                "n": 1,
+                "accuracy": 1.0
+              },
+              "explicit_target": {
+                "correct": 18,
+                "n": 27,
+                "accuracy": 0.6667
+              },
+              "general_approval": {
+                "correct": 4,
+                "n": 9,
+                "accuracy": 0.4444
+              },
+              "no_position": {
+                "correct": 15,
+                "n": 21,
+                "accuracy": 0.7143
+              },
+              "unaddressed": {
+                "correct": 12,
+                "n": 17,
+                "accuracy": 0.7059
+              }
+            }
+          }
+        }
+      },
+      "primary_AB": {
+        "accepted_correct": 51,
+        "accepted_pairs": 77,
+        "eligible_pairs": 119,
+        "by_basis_before": {
+          "explicit_exclusion": {
+            "correct": 1,
+            "n": 1,
+            "accuracy": 1.0
+          },
+          "explicit_target": {
+            "correct": 23,
+            "n": 37,
+            "accuracy": 0.6216
+          },
+          "no_position": {
+            "correct": 15,
+            "n": 22,
+            "accuracy": 0.6818
+          },
+          "unaddressed": {
+            "correct": 12,
+            "n": 17,
+            "accuracy": 0.7059
+          }
+        },
+        "by_basis_after": {
+          "explicit_exclusion": {
+            "correct": 1,
+            "n": 1,
+            "accuracy": 1.0
+          },
+          "explicit_target": {
+            "correct": 18,
+            "n": 28,
+            "accuracy": 0.6429
+          },
+          "general_approval": {
+            "correct": 5,
+            "n": 9,
+            "accuracy": 0.5556
+          },
+          "no_position": {
+            "correct": 15,
+            "n": 22,
+            "accuracy": 0.6818
+          },
+          "unaddressed": {
+            "correct": 12,
+            "n": 17,
+            "accuracy": 0.7059
+          }
+        },
+        "option_c": {
+          "exact_only": {
+            "accepted_correct": 51,
+            "accepted_pairs": 77,
+            "eligible_pairs": 119,
+            "correct_automatic_yield": 0.4286,
+            "by_basis": {
+              "explicit_exclusion": {
+                "correct": 1,
+                "n": 1,
+                "accuracy": 1.0
+              },
+              "explicit_target": {
+                "correct": 23,
+                "n": 37,
+                "accuracy": 0.6216
+              },
+              "no_position": {
+                "correct": 15,
+                "n": 22,
+                "accuracy": 0.6818
+              },
+              "unaddressed": {
+                "correct": 12,
+                "n": 17,
+                "accuracy": 0.7059
+              }
+            }
+          },
+          "exact_and_inferred": {
+            "accepted_correct": 50,
+            "accepted_pairs": 77,
+            "eligible_pairs": 119,
+            "correct_automatic_yield": 0.4202,
+            "by_basis": {
+              "explicit_exclusion": {
+                "correct": 1,
+                "n": 1,
+                "accuracy": 1.0
+              },
+              "explicit_target": {
+                "correct": 18,
+                "n": 28,
+                "accuracy": 0.6429
+              },
+              "general_approval": {
+                "correct": 4,
+                "n": 9,
+                "accuracy": 0.4444
+              },
+              "no_position": {
+                "correct": 15,
+                "n": 22,
+                "accuracy": 0.6818
+              },
+              "unaddressed": {
+                "correct": 12,
+                "n": 17,
+                "accuracy": 0.7059
+              }
+            }
+          }
+        }
+      },
+      "relabelled_rows": {
+        "total": 15,
+        "inferred": 15
+      },
+      "relabelled_comments": 4
+    }
+  },
+  "input_sha256": {
+    "reference": "22a62d0b6846267210b4fbc9cf448f8e853e10083f789a45cd6f1af91874aa1b",
+    "script": "c1d69b542c893e499a704e5f5709bab802de028536ceed4bc2c28c64f952ecf6",
+    "model_comparison_checkpointed_20260929T064921105737Z_gptoss-120b_full.parquet": "609108442129f8ec04838991fd0d213489db4d690757ae2986bafe6b5b3db24e",
+    "model_comparison_checkpointed_20260929T064921105737Z_gptoss-120b_full.expected.parquet": "cacd8cc21590a2de654d9d08131b4133f97ec38ad0acc4aff284ec0ec9a44d71",
+    "model_comparison_checkpointed_20260929T064921105737Z_qwen35-397b_full.partial.parquet": "dcecc8e2fa1dcab72c22487b394054bcf8652f423a4e86be17411125774cec08",
+    "model_comparison_checkpointed_20260929T064921105737Z_qwen35-397b_full.expected.parquet": "cacd8cc21590a2de654d9d08131b4133f97ec38ad0acc4aff284ec0ec9a44d71",
+    "screening_fold0_evidence_ids_20260928T142234517635Z_live.parquet": "eedffbfe5d92cd2c93844d644eab24c83bb7b35627e68d4f16a5ed5e303a328e",
+    "screening_fold0_evidence_ids_20260928T142234517635Z_live.expected.parquet": "cacd8cc21590a2de654d9d08131b4133f97ec38ad0acc4aff284ec0ec9a44d71"
+  }
+}

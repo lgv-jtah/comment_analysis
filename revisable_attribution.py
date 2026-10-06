@@ -13,7 +13,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model, model_validator
 
 from llm_handler import DuplicateJSONKeyError
-from policy import _accepted, _failed, _needs_review, _normalize_whitespace, restates_general_approval
+from policy import (GENERAL_APPROVAL_STANCE, _accepted, _failed, _needs_review, _normalize_whitespace,
+                    restates_general_approval)
 from policy_schemas import ScopeAttributionResult, ScopeType, StanceLabelV2
 from stance_detector import StanceDetector
 
@@ -466,19 +467,21 @@ class RevisableAttributionEngine:
             stance = target.stance
             explanation = target.explanation
             if basis in ("unaddressed", "no_position"):
-                stance = StanceLabelV2.IN_FAVOR if general_support else StanceLabelV2.NEUTRAL
+                stance = StanceLabelV2.NEUTRAL
                 if general_support:
+                    stance = GENERAL_APPROVAL_STANCE
                     basis, evidence = "general_approval", scope.comment_evidence
                     explanation = scope.explanation.strip() or (
-                        "Allgemeine Zustimmung zum gesamten Beitrag wird auf diese Kernaussage uebertragen."
+                        "Allgemeine Zustimmung zum gesamten Beitrag, kein eigener Stance zu dieser Kernaussage."
                     )
             elif (basis == "explicit_target" and stance == StanceLabelV2.IN_FAVOR and general_support
                   and restates_general_approval(evidence, scope.comment_evidence)):
-                # Same label, corrected provenance: support quoting only the
-                # comment-wide approval is inherited, not target-specific.
+                # Support quoting only the comment-wide approval is inherited,
+                # not target-specific: general-approval provenance and stance.
+                stance = GENERAL_APPROVAL_STANCE
                 basis, evidence = "general_approval", scope.comment_evidence
-                explanation = explanation.strip() or scope.explanation.strip() or (
-                    "Allgemeine Zustimmung zum gesamten Beitrag wird auf diese Kernaussage uebertragen."
+                explanation = scope.explanation.strip() or (
+                    "Allgemeine Zustimmung zum gesamten Beitrag, kein eigener Stance zu dieser Kernaussage."
                 )
             reasons = [flag if flag in {"unresolved_reply_reference", "suspected_sarcasm"}
                        else f"{origin}_uncertainty_flag:{index}"

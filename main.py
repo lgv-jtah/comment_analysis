@@ -27,7 +27,7 @@ from key_message_extractor import KeyMessageExtraction
 from key_message_judge import KeyMessageJudge
 from comment_fetcher import CommentFetcher
 from contributions_with_comments_dataset import ContributionsWithCommentsDataset
-from whole_process import WholeProcess
+from whole_process import WholeProcess, summarize_v2_by_key_message
 from ionos_config import IonosVerificationError
 from dotenv import load_dotenv
 from collections import defaultdict
@@ -1146,6 +1146,14 @@ async def run_whole_process_v2() -> None:
         return
     result_df.to_parquet(output_path)
     console.print(f"[green]Whole process (v2) saved to {output_path} — {len(result_df)} rows written[/green]")
+    summary_path = output_path.with_name(f"{output_path.stem}_summary.parquet")
+    summary_df = summarize_v2_by_key_message(result_df)
+    summary_df.to_parquet(summary_path)
+    console.print(
+        f"[green]Per-key-message summary saved to {summary_path} - {len(summary_df)} rows, "
+        f"{int(summary_df.drop_duplicates('contribution_id').contribution_general_approval_comments.sum())} "
+        f"general-approval comments[/green]"
+    )
 
 
 def inspect_key_messages() -> None:

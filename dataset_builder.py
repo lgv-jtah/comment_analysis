@@ -442,8 +442,11 @@ def build_cohort_b(gold_labels_path: Path) -> pd.DataFrame:
 # Policy-derived fixtures (brief section 4's synthetic examples)
 # --------------------------------------------------------------------------
 
-# Verbatim from STANCE_PIPELINE_IMPLEMENTATION_BRIEF.md section 4's synthetic
-# policy examples table. Assumes three key messages: add bicycle stands,
+# From STANCE_PIPELINE_IMPLEMENTATION_BRIEF.md section 4's synthetic policy
+# examples table, with general approval adapted to the 2026-10-06 decision
+# change (option C, docs/stance_policy_v2.md): general approval is a
+# contribution-level signal (basis general_approval), each key message
+# neutral. Assumes three key messages: add bicycle stands,
 # remove car parking spaces, plant trees. Tagged policy_derived, never
 # human_gold, never merged into dataset/pairs.parquet. Selection is fixed
 # here (not derived from any candidate model's output).
@@ -452,23 +455,24 @@ POLICY_FIXTURES: list[dict] = [
         "fixture_id": "policy_fixture_01",
         "comment_text": "Super Idee!",
         "expected": {
-            "bicycle_stands": "in_favor",
-            "remove_parking": "in_favor",
-            "plant_trees": "in_favor",
+            "bicycle_stands": "neutral",
+            "remove_parking": "neutral",
+            "plant_trees": "neutral",
         },
         "basis": "general_approval",
-        "note": "General approval; all three in_favor.",
+        "note": "General approval of the contribution; all three neutral with basis general_approval.",
     },
     {
         "fixture_id": "policy_fixture_02",
         "comment_text": "Danke, ja!",
         "expected": {
-            "bicycle_stands": "in_favor",
-            "remove_parking": "in_favor",
-            "plant_trees": "in_favor",
+            "bicycle_stands": "neutral",
+            "remove_parking": "neutral",
+            "plant_trees": "neutral",
         },
         "basis": "general_approval",
-        "note": "General approval when directly addressed to the contribution; all three in_favor.",
+        "note": "General approval when directly addressed to the contribution; all three neutral "
+                "with basis general_approval.",
     },
     {
         "fixture_id": "policy_fixture_03",
@@ -485,12 +489,13 @@ POLICY_FIXTURES: list[dict] = [
         "fixture_id": "policy_fixture_04",
         "comment_text": "Ich unterstütze den gesamten Vorschlag, nur die Parkplätze sollten bleiben.",
         "expected": {
-            "bicycle_stands": "in_favor",
+            "bicycle_stands": "neutral",
             "remove_parking": "against",
-            "plant_trees": "in_favor",
+            "plant_trees": "neutral",
         },
         "basis": "mixed_qualified",
-        "note": "Parking removal against; bicycle stands and trees in_favor.",
+        "note": "Parking removal against (explicit_target); bicycle stands and trees neutral with "
+                "basis general_approval (scope extends).",
     },
     {
         "fixture_id": "policy_fixture_05",

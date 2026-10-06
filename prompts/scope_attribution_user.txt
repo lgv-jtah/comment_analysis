@@ -11,7 +11,7 @@ Analysiere, worauf sich der folgende Kommentar bezieht: auf den gesamten Beitrag
 
 Wenn scope_type = mixed_qualified: Entscheide zusätzlich, ob die allgemeine Zustimmung des Kommentars auch auf die Kernaussagen ausstrahlt, die NICHT explizit erwähnt werden.
 
-* true: z. B. "Ich unterstütze den gesamten Vorschlag, nur die Parkplätze sollten bleiben." -- die nicht erwähnten Kernaussagen sind mit gemeint (in_favor).
+* true: z. B. "Ich unterstütze den gesamten Vorschlag, nur die Parkplätze sollten bleiben." -- die allgemeine Zustimmung gilt auch für die nicht erwähnten Kernaussagen.
 * false/null: z. B. "Gute Idee mit den Fahrradständern, aber die Parkplätze sollten bleiben." -- die Zustimmung bezieht sich nur auf die explizit genannte Kernaussage, nicht erwähnte Kernaussagen bleiben neutral.
 
 ## Wichtige Prinzipien

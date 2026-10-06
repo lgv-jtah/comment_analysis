@@ -121,7 +121,7 @@ def test_run_benchmark_produces_expected_columns(monkeypatch):
 
     assert list(result.columns) == list(benchmark.OUTPUT_COLUMNS_V2)
     assert len(result) == 1
-    assert result.iloc[0]["final_stance"] == "in_favor"
+    assert result.iloc[0]["final_stance"] == "neutral"
     assert result.iloc[0]["basis"] == "general_approval"
 
 
@@ -218,7 +218,7 @@ def test_run_benchmark_one_call_mode(monkeypatch):
     )
 
     assert len(result) == 1
-    assert result.iloc[0]["final_stance"] == "in_favor"
+    assert result.iloc[0]["final_stance"] == "neutral"
     assert result.iloc[0]["basis"] == "general_approval"
 
 

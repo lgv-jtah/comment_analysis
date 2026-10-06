@@ -949,8 +949,8 @@ class FakeWholeProcess:
                     "comment_text": "c1",
                     "pair_id": "abc123",
                     "status": "accepted",
-                    "proposed_stance": "in_favor",
-                    "final_stance": "in_favor",
+                    "proposed_stance": "neutral",
+                    "final_stance": "neutral",
                     "basis": "general_approval",
                     "comment_evidence": [],
                     "source_evidence": [],
@@ -1272,7 +1272,7 @@ def test_run_v2_flattens_one_row_per_key_message(monkeypatch):
 
     assert len(result) == 2  # one comment x two key messages
     assert set(result["key_message"]) == {"km1", "km2"}
-    assert (result["final_stance"] == "in_favor").all()
+    assert (result["final_stance"] == "neutral").all()
     assert (result["basis"] == "general_approval").all()
     assert (result["policy_version"] == "v2").all()
     assert list(result.columns) == list(whole_process.OUTPUT_COLUMNS_V2)
@@ -1382,8 +1382,11 @@ def test_run_whole_process_v2_happy_path(monkeypatch, tmp_data_dir):
     assert output.exists()
     written = pd.read_parquet(output)
     assert list(written.columns) == whole_process.OUTPUT_COLUMNS_V2
-    assert written.iloc[0]["final_stance"] == "in_favor"
+    assert written.iloc[0]["final_stance"] == "neutral"
     assert written.iloc[0]["policy_version"] == "v2"
+    summary = pd.read_parquet(output.with_name(f"{output.stem}_summary.parquet"))
+    assert list(summary.columns) == whole_process.SUMMARY_COLUMNS_V2
+    assert summary.iloc[0][["comments", "general_approval", "contribution_general_approval_comments"]].tolist() == [1, 1, 1]
 
 
 def test_run_whole_process_v2_missing_comments(monkeypatch, tmp_data_dir):
@@ -1574,7 +1577,7 @@ def test_run_v2_proceeds_when_ionos_routing_confirmed(monkeypatch):
     result = asyncio.run(processor.run_v2(df))
 
     assert len(result) == 1
-    assert result.iloc[0]["final_stance"] == "in_favor"
+    assert result.iloc[0]["final_stance"] == "neutral"
 
 
 def test_run_whole_process_v2_reports_ionos_verification_failure_cleanly(monkeypatch, tmp_data_dir, capsys):
@@ -1596,3 +1599,61 @@ def test_run_whole_process_v2_reports_ionos_verification_failure_cleanly(monkeyp
 
     assert list(tmp_data_dir.glob("whole_process_v2_*.parquet")) == []
     assert "IONOS routing check failed" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# summarize_v2_by_key_message
+# ---------------------------------------------------------------------------
+
+
+def _v2_row(contribution_id, km, comment, status="accepted", stance=None, basis=None):
+    return {
+        "contribution_id": contribution_id, "contributionContent": "Beitrag",
+        "key_message_id": f"{contribution_id}:{km}", "key_message": km, "comment_text": comment,
+        "pair_id": "p", "status": status,
+        "proposed_stance": stance, "final_stance": stance if status == "accepted" else None,
+        "basis": basis, "comment_evidence": [], "source_evidence": [], "explanation": "",
+        "review_reasons": [], "policy_version": "v2", "run_id": "r",
+        "extraction_model_name": "x", "stance_model_name": "y",
+    }
+
+
+def test_summary_separates_general_approval_from_key_message_stances():
+    rows = []
+    for _ in range(2):  # two separate "Stimmt" comments: identical text, both general approval
+        rows += [_v2_row(1, km, "Stimmt", stance="neutral", basis="general_approval") for km in ("km1", "km2")]
+    rows += [_v2_row(1, "km1", "Mehr Bäume!", stance="in_favor", basis="explicit_target"),
+             _v2_row(1, "km2", "Mehr Bäume!", stance="neutral", basis="unaddressed")]
+    rows += [_v2_row(1, "km1", "Siehe oben", status="needs_review"),
+             _v2_row(1, "km2", "Siehe oben", status="needs_review")]
+    # Mixed approval: explicit opposition on km2, general approval extends to km1.
+    rows += [_v2_row(1, "km1", "Alles gut, nur km2 nicht", stance="neutral", basis="general_approval"),
+             _v2_row(1, "km2", "Alles gut, nur km2 nicht", stance="against", basis="explicit_target")]
+    rows += [_v2_row(2, "km1", "Nein", status="failed")]
+
+    summary = whole_process.summarize_v2_by_key_message(
+        pd.DataFrame(rows, columns=whole_process.OUTPUT_COLUMNS_V2))
+
+    assert list(summary.columns) == whole_process.SUMMARY_COLUMNS_V2
+    by_km = summary.set_index("key_message_id")
+    assert by_km.loc["1:km1", ["comments", "in_favor", "against", "neutral", "general_approval",
+                               "needs_review", "failed"]].tolist() == [5, 1, 0, 0, 3, 1, 0]
+    assert by_km.loc["1:km2", ["comments", "in_favor", "against", "neutral", "general_approval",
+                               "needs_review", "failed"]].tolist() == [5, 0, 1, 1, 2, 1, 0]
+    assert by_km.loc["1:km1", ["contribution_comments", "contribution_general_approval_comments"]].tolist() == [5, 3]
+    assert by_km.loc["2:km1", ["comments", "failed", "contribution_comments",
+                               "contribution_general_approval_comments"]].tolist() == [1, 1, 1, 0]
+    assert summary.key_message_id.tolist() == ["1:km1", "1:km2", "2:km1"]
+
+
+def test_summary_of_empty_result_has_columns():
+    empty = pd.DataFrame(columns=whole_process.OUTPUT_COLUMNS_V2)
+    summary = whole_process.summarize_v2_by_key_message(empty)
+    assert summary.empty and list(summary.columns) == whole_process.SUMMARY_COLUMNS_V2
+
+
+def test_summary_rejects_accepted_row_without_stance():
+    bad = pd.DataFrame([_v2_row(1, "km1", "x", stance=None, basis="unaddressed")],
+                       columns=whole_process.OUTPUT_COLUMNS_V2)
+    with pytest.raises(ValueError, match="Unexpected"):
+        whole_process.summarize_v2_by_key_message(bad)

@@ -46,7 +46,7 @@ def run(first=None, second=None):
 @pytest.mark.parametrize("kind", ["whole_contribution_approval", "unresolved", "target_specific", "mixed_qualified"])
 def test_every_first_stage_scope_sees_all_original_targets_and_can_be_revised(kind):
     outputs, handler = run(scope(kind), revised())
-    assert [o.final_stance for o in outputs] == ["in_favor", "against", "neutral"]
+    assert [o.final_stance for o in outputs] == ["neutral", "against", "neutral"]
     assert [o.basis for o in outputs] == ["general_approval", "explicit_target", "explicit_exclusion"]
     assert handler.call_model.await_count == 2
     for call in handler.call_model.call_args_list:
@@ -74,7 +74,8 @@ def test_general_approval_inherits_only_without_explicit_exception(attribution):
     response["targets"] = [dict(key_message_id=km.key_message_id, attribution=attribution)
                            for km in context().key_messages]
     outputs, _ = run(scope("unresolved"), response)
-    assert all(o.final_stance == "in_favor" and o.basis == "general_approval" for o in outputs)
+    assert all(o.final_stance == "neutral" and o.basis == "general_approval" for o in outputs)
+    assert all(o.comment_evidence == ["Alles gut"] for o in outputs)
     response["revised_scope"] = scope("target_specific")
     outputs, _ = run(scope(), response)
     assert all(o.final_stance == "neutral" and o.basis == attribution for o in outputs)
@@ -94,9 +95,10 @@ def blanket_support(revised_scope, evidence=("Alles gut",), stance="in_favor", e
 @pytest.mark.parametrize("evidence", [("Alles gut",), ("gut",), ("Alles  gut",)])
 def test_explicit_support_quoting_only_general_evidence_is_general_approval(revised_scope, evidence):
     outputs, _ = run(scope(), blanket_support(revised_scope, evidence))
-    assert all(o.status == "accepted" and o.final_stance == "in_favor" for o in outputs)
+    assert all(o.status == "accepted" and o.final_stance == "neutral" for o in outputs)
     assert all(o.basis == "general_approval" and o.comment_evidence == ["Alles gut"] for o in outputs)
-    assert all(o.explanation == "Zustimmung." for o in outputs)
+    # The target's "explicit support" explanation would contradict neutral.
+    assert all(o.explanation == "Allgemeine Zustimmung zum gesamten Beitrag, kein eigener Stance zu dieser Kernaussage." for o in outputs)
 
 
 @pytest.mark.parametrize("revised_scope", [
@@ -118,14 +120,14 @@ def test_target_specific_evidence_or_opposition_stays_explicit():
 
 @pytest.mark.parametrize("global_explanation", ["Revidierte allgemeine Zustimmung.", ""])
 def test_relabelled_support_explanation_falls_back_and_review_keeps_provenance(global_explanation):
-    response = blanket_support(scope(explanation=global_explanation), explanation="")
+    response = blanket_support(scope(explanation=global_explanation))
     response["targets"][0]["uncertainty_flags"] = ["suspected_sarcasm"]
     outputs, _ = run(scope(), response)
     assert outputs[0].status == "needs_review" and outputs[0].final_stance is None
-    assert outputs[0].proposed_stance == "in_favor"
+    assert outputs[0].proposed_stance == "neutral"
     assert all(o.basis == "general_approval" for o in outputs)
     assert all(o.explanation == (global_explanation or
-               "Allgemeine Zustimmung zum gesamten Beitrag wird auf diese Kernaussage uebertragen.")
+               "Allgemeine Zustimmung zum gesamten Beitrag, kein eigener Stance zu dieser Kernaussage.")
                for o in outputs)
 
 
@@ -226,10 +228,10 @@ def test_inherited_support_explains_global_policy_for_accepted_and_review(review
         response["targets"][0]["uncertainty_flags"] = ["suspected_sarcasm"]
     outputs, _ = run(scope(), response)
     output = outputs[0]
-    assert output.proposed_stance == "in_favor"
+    assert output.proposed_stance == "neutral"
     assert output.status == ("needs_review" if review else "accepted")
     assert output.explanation == (global_explanation or
-        "Allgemeine Zustimmung zum gesamten Beitrag wird auf diese Kernaussage uebertragen.")
+        "Allgemeine Zustimmung zum gesamten Beitrag, kein eigener Stance zu dieser Kernaussage.")
     assert output.basis == "general_approval"
     assert outputs[1].explanation == response["targets"][1].get("explanation", "")
 
@@ -344,7 +346,8 @@ def test_uncertainty_reason_sanitization_preserves_proposal_and_review():
     response["revised_scope"]["uncertainty_flags"] = [SECRET]
     response["targets"][1]["uncertainty_flags"] = [SECRET]
     outputs, _ = run(scope(), response)
-    assert [o.proposed_stance for o in outputs] == ["in_favor", "against", "neutral"]
+    assert [o.proposed_stance for o in outputs] == ["neutral", "against", "neutral"]
+    assert [o.basis for o in outputs] == ["general_approval", "explicit_target", "explicit_exclusion"]
     assert all(o.status == "needs_review" and o.final_stance is None for o in outputs)
     assert outputs[1].review_reasons == ["scope_uncertainty_flag:0", "target_uncertainty_flag:0"]
     assert SECRET not in json.dumps([o.review_reasons for o in outputs])
@@ -392,7 +395,7 @@ def test_response_schema_and_prompt_hashes_unchanged():
     ]:
         assert hashlib.sha256(json.dumps(schema.model_json_schema(), sort_keys=True).encode()).hexdigest() == digest
     for filename, digest in [
-        ("revisable_attribution_system.txt", "2f0bd0c5b29ab27b810fcfa89065623683841bad8484eaa54a1028a73bfe7c2c"),
+        ("revisable_attribution_system.txt", "47b5fadaeb6301f6fed05cb5a7fd680bbef4d5d11aca9aad2db7bdf22942eb11"),
         ("global_hypothesis_user.txt", "e4f1e3dc74e3dfc6f91f9deffce575b00cb7ebf06d977d6fdc98d484d9269da3"),
         ("revised_attribution_user.txt", "16f78512027de07ce9fd86ceaf9e29da58e0808fb09d967511652b40712ede95"),
     ]:
