@@ -20,14 +20,12 @@ is the one that actually answers the question.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 import httpx
 
-# Substring match against litellm_params.api_base. IONOS's documented
-# OpenAI-compatible base is https://openai.inference.de-txl.ionos.com/v1/
-# (STANCE_PIPELINE_IMPLEMENTATION_BRIEF.md section 8); matching on the host
-# rather than the full URL tolerates IONOS adding/rotating regions or paths.
-IONOS_HOST_MARKER = "ionos.com"
+# New regional hosts require explicit approval rather than substring trust.
+IONOS_APPROVED_HOSTS = {"openai.inference.de-txl.ionos.com"}
 
 DEFAULT_TIMEOUT = 10.0
 
@@ -55,7 +53,13 @@ class ModelRouteInfo:
 
 
 def _is_ionos_routed(api_base: str | None) -> bool:
-    return bool(api_base) and IONOS_HOST_MARKER in api_base.lower()
+    try:
+        url = urlsplit(api_base or "")
+        return (url.scheme == "https" and url.hostname in IONOS_APPROVED_HOSTS
+                and url.port in (None, 443) and not url.username and not url.password
+                and not url.query and not url.fragment)
+    except ValueError:
+        return False
 
 
 def discover_models(
@@ -77,7 +81,8 @@ def discover_models(
             unreachable, ...) -- a configuration error surfaced directly
             rather than silently swallowed.
     """
-    url = f"{base_url.rstrip('/')}/v1/model/info"
+    root = base_url.rstrip("/")
+    url = f"{root if root.endswith('/v1') else root + '/v1'}/model/info"
     response = httpx.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=timeout)
     response.raise_for_status()
     payload = response.json()
@@ -89,11 +94,14 @@ def discover_models(
             continue
         params = entry.get("litellm_params") or {}
         api_base = params.get("api_base")
+        previous = routes.get(model_name)
         routes[model_name] = ModelRouteInfo(
             model_name=model_name,
             upstream_model=params.get("model"),
             api_base=api_base,
-            is_ionos=_is_ionos_routed(api_base),
+            is_ionos=_is_ionos_routed(api_base) and (previous is None or (
+                previous.is_ionos and previous.upstream_model == params.get("model")
+                and (previous.api_base or "").rstrip("/") == (api_base or "").rstrip("/"))),
         )
     return routes
 
@@ -121,6 +129,8 @@ def verify_ionos_only(
         IonosVerificationError: If the model is unknown to the proxy or is
             routed to a non-IONOS backend.
     """
+    if _is_ionos_routed(base_url):
+        return ModelRouteInfo(model_name, model_name, base_url, True)
     routes = discover_models(base_url, api_key, timeout=timeout)
     info = routes.get(model_name)
     if info is None:

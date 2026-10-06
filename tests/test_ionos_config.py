@@ -2,6 +2,7 @@ import httpx
 import pytest
 
 from ionos_config import (
+    _is_ionos_routed,
     IonosVerificationError,
     ModelRouteInfo,
     discover_models,
@@ -137,3 +138,40 @@ def test_verify_ionos_only_raises_for_unknown_model(monkeypatch):
 
     with pytest.raises(IonosVerificationError, match="not present"):
         verify_ionos_only("some-model-not-configured", "http://localhost:4000", api_key="sk-test")
+
+
+@pytest.mark.parametrize("url", [
+    "http://openai.inference.de-txl.ionos.com/v1",
+    "https://ionos.com.evil.example/v1",
+    "https://evil.example/ionos.com",
+    "https://ionos.com@evil.example/v1",
+    "https://openai.inference.de-txl.ionos.com:444/v1",
+    "https://user@openai.inference.de-txl.ionos.com/v1",
+    "https://x.ionos.com/v1",
+    "https://openai.inference.de-txl.ionos.com:invalid/v1",
+])
+def test_only_approved_https_hostname_is_trusted(url):
+    assert not _is_ionos_routed(url)
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_mixed_provider_alias_never_trusted_regardless_of_entry_order(monkeypatch, reverse):
+    entries = [_entry("mixed", "one", "https://openai.inference.de-txl.ionos.com/v1"),
+               _entry("mixed", "two", "https://other.example/v1")]
+    monkeypatch.setattr("ionos_config.httpx.get", lambda *a, **k: FakeModelInfoResponse(
+        _payload(entries[::-1] if reverse else entries)))
+    with pytest.raises(IonosVerificationError):
+        verify_ionos_only("mixed", "http://localhost:4000/v1", "test")
+
+
+def test_proxy_v1_suffix_is_not_duplicated(monkeypatch):
+    calls = []
+    monkeypatch.setattr("ionos_config.httpx.get", lambda url, **kw: (
+        calls.append(url) or FakeModelInfoResponse(_payload([]))))
+    discover_models("http://localhost:4000/v1/", "test")
+    assert calls == ["http://localhost:4000/v1/model/info"]
+
+
+def test_direct_approved_endpoint_does_not_query_proxy_metadata(monkeypatch):
+    monkeypatch.setattr("ionos_config.httpx.get", lambda *a, **k: pytest.fail("unexpected network"))
+    assert verify_ionos_only("configured-id", "https://openai.inference.de-txl.ionos.com/v1", "test").is_ionos
