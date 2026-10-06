@@ -26,6 +26,26 @@ RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 # fails immediately -- it reflects a bad request, not a transient condition.
 AUTH_ERROR_STATUS_CODES = frozenset({401, 403})
 
+
+class DuplicateJSONKeyError(ValueError):
+    def __init__(self):
+        super().__init__("duplicate_json_key")
+
+
+def _unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise DuplicateJSONKeyError()
+        result[key] = value
+    return result
+
+
+def schema_response_format(schema):
+    return {"type": "json_schema", "json_schema": {
+        "name": schema.__name__, "schema": schema.model_json_schema(),
+    }}
+
 STANCE_LABEL_MAP = {
     "IN FAVOR": "in favor",
     "AGAINST": "ablehnung",
@@ -207,6 +227,7 @@ class LLMHandler:
         """Initialize the handler with a default model and a single-slot semaphore."""
         self.model_name = "Qwen/Qwen3.5-27B-FP8"
         self.semaphore = asyncio.Semaphore(1)
+        self.safe_logging = False
         pass
 
     async def call_model(
@@ -224,6 +245,8 @@ class LLMHandler:
     retry_base_delay: float = DEFAULT_RETRY_BASE_DELAY,
     retry_max_delay: float = DEFAULT_RETRY_MAX_DELAY,
     request_timeout: httpx.Timeout | None = None,
+    reject_duplicate_json_keys: bool = False,
+    strict_json: bool = False,
     ) -> dict | None:
         """Call a vLLM/OpenAI-compatible chat completions endpoint.
 
@@ -258,11 +281,14 @@ class LLMHandler:
             request_timeout: Optional override for the per-attempt httpx
                 timeout; defaults to the existing split timeout
                 (connect=10s, read=600s, write=30s, pool=10s) when None.
+            strict_json: Parse the untouched response as JSON, rejecting duplicate
+                keys, wrappers and prose without legacy cleanup or label remapping.
 
         Returns:
             The parsed JSON object from the model's reply, or None if every
             attempt failed or the reply cannot be parsed as JSON.
         """
+        reject_duplicate_json_keys = reject_duplicate_json_keys or strict_json
         async with semaphore:
             full_messages = [{"role": "system", "content": system}] + messages
 
@@ -279,13 +305,7 @@ class LLMHandler:
             # None, so this keeps the default behaviour for legacy callers
             # while staying a single concise expression.
             schema_model = response_schema or Stance
-            response_format = {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": schema_model.__name__,
-                    "schema": schema_model.model_json_schema()
-                }
-            }
+            response_format = schema_response_format(schema_model)
             # Must stay a native dict: httpx's json= kwarg serializes the
             # whole body once, so a pre-encoded JSON string here would be
             # double-encoded and rejected with HTTP 400.
@@ -324,33 +344,37 @@ class LLMHandler:
                         response.raise_for_status()
 
                         data = response.json()
+                        if data["choices"][0].get("finish_reason") == "length":
+                            print("  Response token limit reached")
+                            return None
                         content = data["choices"][0]["message"]["content"]
 
                         # If thinking mode, the actual response may be after </think> tags
-                        if enable_thinking and "<think>" in content:
+                        if not strict_json and enable_thinking and "<think>" in content:
                             parts = content.split("</think>")
                             if len(parts) > 1:
                                 content = parts[-1].strip()
 
-                        # Strip markdown fences if present
-                        clean = content.strip()
-                        clean = (
-                            clean.removeprefix("```json")
-                            .removeprefix("```")
-                            .removesuffix("```")
-                            .strip()
-                        )
+                        clean = content
+                        if not strict_json:
+                            clean = (
+                                clean.strip().removeprefix("```json")
+                                .removeprefix("```")
+                                .removesuffix("```")
+                                .strip()
+                            )
 
                         # Try to find JSON object in the response
                         start = clean.find("{")
                         end = clean.rfind("}") + 1
-                        if start >= 0 and end > start:
+                        if not reject_duplicate_json_keys and start >= 0 and end > start:
                             clean = clean[start:end]
 
-                        parsed = json.loads(clean)
+                        parsed = (json.loads(clean, object_pairs_hook=_unique_json_object)
+                                  if reject_duplicate_json_keys else json.loads(clean))
                         # Only "stance" is remapped to the gold vocabulary; "explanation"
                         # is free-form natural language and must be returned verbatim.
-                        if isinstance(parsed, dict) and "stance" in parsed:
+                        if not reject_duplicate_json_keys and isinstance(parsed, dict) and "stance" in parsed:
                             parsed["stance"] = normalize_stance_label(parsed["stance"])
                         return parsed
 
@@ -362,7 +386,7 @@ class LLMHandler:
                         if status in RETRYABLE_STATUS_CODES and attempt < max_retries:
                             retry_after = _parse_retry_after(e.response.headers.get("Retry-After"))
                             delay = (
-                                retry_after
+                                min(retry_after, retry_max_delay)
                                 if retry_after is not None
                                 else _compute_backoff_delay(attempt, retry_base_delay, retry_max_delay)
                             )
@@ -373,9 +397,15 @@ class LLMHandler:
                             await asyncio.sleep(delay)
                             attempt += 1
                             continue
-                        print(f"  HTTP error: {status} - {e.response.text[:200]}")
+                        print(f"  HTTP error: {status}" if reject_duplicate_json_keys or self.safe_logging else
+                              f"  HTTP error: {status} - {e.response.text[:200]}")
                         return None
+                    except DuplicateJSONKeyError:
+                        raise
                     except json.JSONDecodeError as e:
+                        if reject_duplicate_json_keys or self.safe_logging:
+                            print("  JSON parse error")
+                            return None
                         print(f"  JSON parse error: {e}")
                         print(f"  Raw response: {content[:300]}")
                         return None
@@ -389,10 +419,12 @@ class LLMHandler:
                             await asyncio.sleep(delay)
                             attempt += 1
                             continue
-                        print(f"  Request error after {max_retries} retries: {e}")
+                        print("  Request error" if reject_duplicate_json_keys or self.safe_logging else
+                              f"  Request error after {max_retries} retries: {e}")
                         return None
                     except Exception as e:
-                        print(f"  Unexpected error: {e}")
+                        print("  Unexpected response error" if reject_duplicate_json_keys or self.safe_logging else
+                              f"  Unexpected error: {e}")
                         return None
             finally:
                 # Fires once per logical call_model() invocation, not once per

@@ -91,6 +91,29 @@ def _call(client, **overrides):
     return asyncio.run(handler.call_model(**params))
 
 
+@pytest.mark.parametrize("content", [
+    '{"secret":"PRIVATE","secret":"PRIVATE"}',
+    '{"targets":{"a":{"attribution":"unaddressed"},"a":{"attribution":"no_position"}}}',
+    '{"targets":{"a":{"explanation":"PRIVATE","explanation":"PRIVATE"}}}',
+])
+def test_duplicate_json_rejection_is_opt_in_and_sanitized(content, capsys):
+    from llm_handler import DuplicateJSONKeyError
+    assert _call(CapturingClient(FakeResponse(content))) == json.loads(content)
+    with pytest.raises(DuplicateJSONKeyError, match="^duplicate_json_key$"):
+        _call(CapturingClient(FakeResponse(content)), reject_duplicate_json_keys=True)
+    assert "PRIVATE" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("content,expected", [
+    ('[{"attribution":"unaddressed"}]', [{"attribution": "unaddressed"}]),
+    ('{"stance":"AGAINST"}', {"stance": "AGAINST"}),
+    ('PRIVATE invalid json', None),
+])
+def test_strict_parsing_does_not_extract_list_objects_or_rewrite_labels(content, expected, capsys):
+    assert _call(CapturingClient(FakeResponse(content)), reject_duplicate_json_keys=True) == expected
+    assert "PRIVATE" not in capsys.readouterr().out
+
+
 def test_happy_path_returns_parsed_dict_and_response_format_is_dict():
     content = '{"stance": "support", "explanation": "x"}'
     client = CapturingClient(response=FakeResponse(content))
@@ -126,6 +149,36 @@ def test_markdown_fenced_json_is_stripped():
     result = _call(client)
 
     assert result == {"stance": "neutral", "explanation": "z"}
+
+
+@pytest.mark.parametrize("wrapper", ["```json\n%s\n```", "```\n%s\n```", "PRIVATE %s", "%s PRIVATE",
+                                    "<think>PRIVATE</think>%s", "\u00a0%s\u00a0"])
+def test_strict_json_rejects_wrappers_without_changing_default(wrapper, monkeypatch, capsys):
+    monkeypatch.setattr("llm_handler.RATE_LIMIT_DELAY", 0)
+    content = wrapper % '{"stance":"neutral"}'
+    strict_client = CapturingClient(FakeResponse(content))
+    legacy_client = CapturingClient(FakeResponse(content))
+    assert _call(strict_client, strict_json=True, enable_thinking=True) is None
+    assert "PRIVATE" not in capsys.readouterr().out
+    assert _call(legacy_client, enable_thinking=True) == {"stance": "neutral"}
+    assert strict_client.captured_kwargs["json"] == legacy_client.captured_kwargs["json"]
+
+
+def test_duplicate_only_option_preserves_fence_cleanup(monkeypatch):
+    monkeypatch.setattr("llm_handler.RATE_LIMIT_DELAY", 0)
+    assert _call(CapturingClient(FakeResponse('```json\n{"stance":"AGAINST"}\n```')),
+                 reject_duplicate_json_keys=True) == {"stance": "AGAINST"}
+
+
+def test_strict_json_preserves_valid_json_and_rejects_duplicates_and_malformed(monkeypatch, capsys):
+    from llm_handler import DuplicateJSONKeyError
+    monkeypatch.setattr("llm_handler.RATE_LIMIT_DELAY", 0)
+    assert _call(CapturingClient(FakeResponse(' \r\n{"stance":"AGAINST"}\t')),
+                 strict_json=True) == {"stance": "AGAINST"}
+    with pytest.raises(DuplicateJSONKeyError):
+        _call(CapturingClient(FakeResponse('{"x":"PRIVATE","x":2}')), strict_json=True)
+    assert _call(CapturingClient(FakeResponse('{"x":"PRIVATE",}')), strict_json=True) is None
+    assert "PRIVATE" not in capsys.readouterr().out
 
 
 def test_http_error_returns_none():
