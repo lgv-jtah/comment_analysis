@@ -194,7 +194,7 @@ def prepare_benchmark(*, source, source_path, reference_path, folds_path, output
                       model_name, mode="two_stage", limit=None, enable_thinking=False,
                       verifier_enabled=False, role="primary", tiers=("A", "B"),
                       dry_run=False, base_url=None, verify_ionos=True, revisable_variant="baseline",
-                      persist=True, run_id=None, durable=False, execution_settings=None):
+                      persist=True, run_id=None, durable=False, execution_settings=None, budget=None):
     """Persist an offline, immutable run specification before any inference."""
     if mode not in ("two_stage", "one_call", "revisable_attribution"):
         raise ValueError(f"Unknown mode {mode!r}")
@@ -256,10 +256,13 @@ def prepare_benchmark(*, source, source_path, reference_path, folds_path, output
         "cache_enabled": False, "resumability_enabled": False,
     }
     if durable:
-        from benchmark_checkpoint import checked_endpoint, DEFAULT_EXECUTION_SETTINGS
+        from benchmark_checkpoint import checked_endpoint, DEFAULT_EXECUTION_SETTINGS, validate_budget
         checked_endpoint(base_url)
         manifest.update(manifest_version="benchmark_checkpoint_v1", resumability_enabled=True)
         manifest["execution_settings"] = execution_settings or DEFAULT_EXECUTION_SETTINGS
+        if budget is not None:
+            # Part of the fingerprinted contract, so a resume cannot change the limits.
+            manifest["budget"] = validate_budget(budget)
         manifest["decoding"]["reasoning_mode"] = "enabled" if enable_thinking else "backend_default"
         manifest["decoding"]["thinking_override"] = True if enable_thinking else None
         manifest["output_columns"] = OUTPUT_COLUMNS_V2
@@ -458,8 +461,13 @@ async def run_benchmark(
     semaphore = asyncio.Semaphore(1)
     rows: list[dict] = checkpoint.rows() if checkpoint is not None else []
     start = checkpoint.completed_comments if checkpoint is not None else 0
+    if client_factory is None and checkpoint is not None and checkpoint.budget is not None:
+        # Every completion attempt through this client is reserved against the budget.
+        client_factory = lambda: httpx.AsyncClient(event_hooks=checkpoint.client_hooks())  # noqa: E731
     async with (client_factory or httpx.AsyncClient)() as client:
         for entry in comments[start:]:
+            if checkpoint is not None:
+                checkpoint.check_budget()
             context = build_comment_context(
                 run_id=run_id,
                 contribution_id=entry["contribution_id"],

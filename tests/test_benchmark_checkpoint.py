@@ -600,3 +600,142 @@ def test_invalid_row_metadata_rejected_before_mutation_or_provider(tmp_path, mon
             with bc.BenchmarkCheckpoint(**args, resume=True) as resumed:
                 run(resumed)
         assert all(p.read_bytes() == data for p, data in artifacts.items())
+
+
+# ---------------------------------------------------------------------------
+# Run budgets
+# ---------------------------------------------------------------------------
+
+BUDGET = dict(max_wall_seconds=None, max_total_tokens=None, max_http_attempts=None)
+
+
+@pytest.mark.parametrize('budget', [
+    {}, dict(BUDGET), dict(BUDGET, max_http_attempts=0), dict(BUDGET, max_total_tokens=1.5),
+    dict(BUDGET, max_wall_seconds=True), dict(BUDGET, extra=1, max_http_attempts=1),
+])
+def test_invalid_budgets_rejected(budget):
+    with pytest.raises(ValueError):
+        bc.validate_budget(budget)
+
+
+def test_budget_is_part_of_the_resume_contract(tmp_path):
+    args = preparation(tmp_path)
+    with bc.BenchmarkCheckpoint(**args, budget=dict(BUDGET, max_http_attempts=10)) as cp:
+        assert cp.manifest['budget']['max_http_attempts'] == 10
+        assert cp.state['execution'] == dict(deadline=None, http_attempts=0, total_tokens=0,
+                                             unknown_usage_responses=0, stop_reason=None)
+    with pytest.raises(ValueError, match='Resume contract changed'):
+        with bc.BenchmarkCheckpoint(**args, budget=dict(BUDGET, max_http_attempts=20), resume=True):
+            pass
+    with bc.BenchmarkCheckpoint(**args, budget=dict(BUDGET, max_http_attempts=10), resume=True) as cp:
+        assert cp.budget['max_http_attempts'] == 10
+
+
+def test_runs_without_budget_keep_empty_execution(tmp_path):
+    with bc.BenchmarkCheckpoint(**preparation(tmp_path)) as cp:
+        assert cp.budget is None and cp.state['execution'] == {}
+        cp.check_budget()
+
+
+def test_client_hooks_reserve_attempts_count_usage_and_stop(tmp_path):
+    import httpx
+
+    def respond(request):
+        if request.url.path.endswith('/error'):
+            return httpx.Response(503)
+        return httpx.Response(200, json={'usage': {'total_tokens': 40}})
+
+    async def calls(cp):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond),
+                                     event_hooks=cp.client_hooks()) as client:
+            await client.post('http://proxy.invalid/ok')
+            await client.post('http://proxy.invalid/error')
+            await client.post('http://proxy.invalid/ok')
+
+    args = preparation(tmp_path)
+    with bc.BenchmarkCheckpoint(**args, budget=dict(BUDGET, max_http_attempts=2)) as cp:
+        with pytest.raises(bc.BudgetExhausted) as stop:
+            asyncio.run(calls(cp))
+        assert stop.value.reason == 'http_attempts'
+        execution = cp.state['execution']
+        assert (execution['http_attempts'], execution['total_tokens'], execution['unknown_usage_responses'],
+                execution['stop_reason']) == (2, 40, 1, 'http_attempts')
+    saved = json.loads(args['output_path'].with_suffix('.checkpoint.json').read_text())['payload']['execution']
+    assert saved['http_attempts'] == 2 and saved['stop_reason'] == 'http_attempts'
+
+
+def test_budget_stop_escapes_llm_handler_exception_handling(tmp_path, monkeypatch):
+    import httpx
+    from llm_handler import LLMHandler
+    monkeypatch.setattr('llm_handler.RATE_LIMIT_DELAY', 0)
+    body = {'choices': [{'finish_reason': 'stop', 'message': {'content': '{"a": 1}'}}],
+            'usage': {'total_tokens': 7}}
+
+    async def calls(cp):
+        handler = LLMHandler()
+        semaphore = asyncio.Semaphore(1)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=body)),
+                                     event_hooks=cp.client_hooks()) as client:
+            first = await handler.call_model(client=client, base_url='http://proxy.invalid', model_name='m',
+                                             system='s', messages=[], semaphore=semaphore)
+            assert first == {'a': 1}
+            await handler.call_model(client=client, base_url='http://proxy.invalid', model_name='m',
+                                     system='s', messages=[], semaphore=semaphore)
+
+    with bc.BenchmarkCheckpoint(**preparation(tmp_path), budget=dict(BUDGET, max_total_tokens=5)) as cp:
+        with pytest.raises(bc.BudgetExhausted) as stop:
+            asyncio.run(calls(cp))
+        assert stop.value.reason == 'total_tokens'
+        assert cp.state['execution']['http_attempts'] == 1
+
+
+def test_deadline_stops_between_comments_and_is_never_reset(tmp_path, monkeypatch):
+    clock = {'now': 1000.0}
+    monkeypatch.setattr(bc.time, 'time', lambda: clock['now'])
+    calls = []
+
+    def call(ctx):
+        calls.append(ctx.comment_text)
+        clock['now'] += 40
+
+    fake_engine(monkeypatch, call)
+    args = preparation(tmp_path, 4)
+    budget = dict(BUDGET, max_wall_seconds=60)
+    with bc.BenchmarkCheckpoint(**args, budget=budget) as cp:
+        with pytest.raises(bc.BudgetExhausted):
+            run(cp)
+        assert cp.completed_comments == 2 and cp.state['execution']['deadline'] == 1060.0
+    assert calls == ['Comment 0', 'Comment 1']
+    clock['now'] = 0.0  # even a clock reset cannot refresh a recorded stop
+    with bc.BenchmarkCheckpoint(**args, budget=budget, resume=True) as cp:
+        with pytest.raises(bc.BudgetExhausted) as stop:
+            run(cp)
+        assert stop.value.reason == 'wall_clock' and cp.completed_comments == 2
+    assert calls == ['Comment 0', 'Comment 1']
+
+
+def test_cli_budget_stop_exports_and_scores_partial(tmp_path, monkeypatch, capsys):
+    args = preparation(tmp_path, 2)
+    monkeypatch.setattr(cli, 'load_dotenv', lambda: None)
+
+    async def stop_after_one(*, checkpoint, **kwargs):
+        checkpoint.commit_comment(rows(checkpoint, 0))
+        raise bc.BudgetExhausted('http_attempts')
+
+    monkeypatch.setattr(cli, 'run_benchmark', stop_after_one)
+    cli.main(['benchmark', '--source', str(args['source_path']), '--reference', str(args['reference_path']),
+              '--output', str(args['output_path']), '--folds', '', '--model-name', 'mock',
+              '--base-url', args['base_url'], '--no-verify-ionos', '--max-http-attempts', '5'])
+    output = capsys.readouterr().out
+    assert 'Run budget exhausted (http_attempts) after 1 comments' in ' '.join(output.split())
+    assert 'missing_prediction_pairs=2' in output
+    assert args['output_path'].with_suffix('.partial.parquet').exists() and not args['output_path'].exists()
+    manifest = json.loads(args['output_path'].with_suffix('.manifest.json').read_text())
+    assert manifest['budget'] == dict(BUDGET, max_http_attempts=5)
+
+
+def test_cli_rejects_budget_on_dry_run(tmp_path):
+    args = preparation(tmp_path)
+    with pytest.raises(ValueError, match='durable live runs'):
+        cli.main(['benchmark', '--source', str(args['source_path']), '--output', str(tmp_path / 'dry.parquet'),
+                  '--dry-run', '--max-wall-seconds', '60'])

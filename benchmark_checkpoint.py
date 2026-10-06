@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import time
 import uuid
 from urllib.parse import urlsplit
 
@@ -24,8 +25,44 @@ DEFAULT_EXECUTION_SETTINGS = {
 }
 
 
+BUDGET_KEYS = ("max_wall_seconds", "max_total_tokens", "max_http_attempts")
+EXECUTION_KEYS = {"deadline", "http_attempts", "total_tokens", "unknown_usage_responses", "stop_reason"}
+STOP_REASONS = ("wall_clock", "total_tokens", "http_attempts")
+
+
 class CheckpointFailure(BaseException):
     """Persistence must escape provider handlers that catch Exception."""
+
+
+class BudgetExhausted(BaseException):
+    """A persisted run budget is used up.
+
+    BaseException, like CheckpointFailure, so LLMHandler's broad Exception
+    handlers cannot turn a stop into a failed call and continue.
+    """
+
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def validate_budget(budget):
+    """Normalize run limits: each a positive int or None, at least one set.
+
+    max_wall_seconds becomes an absolute deadline when the run starts and is
+    never reset on resume. max_http_attempts counts completion requests sent
+    through the run's client, including retries (not the route-metadata
+    check). max_total_tokens counts client-visible usage only; a request in
+    flight when it is reached can overshoot it, so it is a soft limit.
+    """
+    if type(budget) is not dict or set(budget) != set(BUDGET_KEYS):
+        raise ValueError(f"Budget must define exactly {BUDGET_KEYS}")
+    for key, value in budget.items():
+        if value is not None and (type(value) is not int or value <= 0):
+            raise ValueError(f"Budget {key} must be a positive integer or None")
+    if all(value is None for value in budget.values()):
+        raise ValueError("Budget must set at least one limit")
+    return dict(budget)
 
 
 class RowValidationError(ValueError):
@@ -148,6 +185,7 @@ class BenchmarkCheckpoint:
                     raise FileExistsError("Output already exists")
             self.expected, self.manifest = prepare_benchmark(
                 **self.preparation, output_path=self.output, persist=False, durable=True, run_id=run_id)
+            self.budget = self.manifest.get("budget")
             self.identities = []
             for entry in load_frozen_comments(self.preparation["source"])[:self.preparation.get("limit")]:
                 ctx = build_comment_context(run_id=self.manifest["run_id"], **entry)
@@ -176,6 +214,13 @@ class BenchmarkCheckpoint:
                 self.state = {"manifest": self.manifest, "manifest_fingerprint": fingerprint(self.manifest),
                     "records": [], "completed_comments": 0, "completed_pairs": 0,
                     "published": False, "session": None, "sessions": [], "execution": {}}
+                if self.budget is not None:
+                    seconds = self.budget["max_wall_seconds"]
+                    self.state["execution"] = {
+                        "deadline": time.time() + seconds if seconds is not None else None,
+                        "http_attempts": 0, "total_tokens": 0, "unknown_usage_responses": 0,
+                        "stop_reason": None,
+                    }
                 self.validate()
                 atomic_json(self.output.with_suffix(".manifest.json"), self.manifest)
                 atomic_write(self.output.with_suffix(".expected.parquet"),
@@ -297,6 +342,17 @@ class BenchmarkCheckpoint:
                 raise ValueError("Invalid unverified route")
         if any(route != routes[0] for route in routes):
             raise ValueError("Provider route changed across sessions")
+        execution = s["execution"]
+        if self.manifest.get("budget") is None:
+            if execution:
+                raise ValueError("Execution counters without a budget")
+        elif (set(execution) != EXECUTION_KEYS
+                or not (execution["deadline"] is None or type(execution["deadline"]) is float)
+                or (execution["deadline"] is None) != (self.manifest["budget"]["max_wall_seconds"] is None)
+                or any(type(execution[k]) is not int or execution[k] < 0
+                       for k in ("http_attempts", "total_tokens", "unknown_usage_responses"))
+                or execution["stop_reason"] not in (None, *STOP_REASONS)):
+            raise ValueError("Invalid execution counters")
 
     def save(self):
         if self.poisoned or self.lock is None:
@@ -318,6 +374,58 @@ class BenchmarkCheckpoint:
         self.state["completed_comments"] += 1
         self.state["completed_pairs"] += len(rows)
         self.save()
+
+    def check_budget(self):
+        """Raise BudgetExhausted, persisting the reason, if any limit is used up."""
+        if self.budget is None:
+            return
+        execution = self.state["execution"]
+        reason = execution["stop_reason"]
+        if reason is None:
+            if execution["deadline"] is not None and time.time() >= execution["deadline"]:
+                reason = "wall_clock"
+            elif (self.budget["max_total_tokens"] is not None
+                    and execution["total_tokens"] >= self.budget["max_total_tokens"]):
+                reason = "total_tokens"
+            elif (self.budget["max_http_attempts"] is not None
+                    and execution["http_attempts"] >= self.budget["max_http_attempts"]):
+                reason = "http_attempts"
+        if reason is not None:
+            if execution["stop_reason"] is None:
+                execution["stop_reason"] = reason
+                self.save()
+            raise BudgetExhausted(reason)
+
+    def reserve_http_attempt(self):
+        """Durably count an attempt before it is sent; refuse it when the budget is used up."""
+        self.check_budget()
+        self.state["execution"]["http_attempts"] += 1
+        self.save()
+
+    def record_usage(self, total_tokens):
+        execution = self.state["execution"]
+        if type(total_tokens) is int and total_tokens >= 0:
+            execution["total_tokens"] += total_tokens
+        else:
+            execution["unknown_usage_responses"] += 1
+        self.save()
+
+    def client_hooks(self):
+        """httpx event hooks that enforce the budget on every request of the run client."""
+        async def on_request(request):
+            self.reserve_http_attempt()
+
+        async def on_response(response):
+            total = None
+            try:
+                await response.aread()
+                usage = response.json().get("usage") or {}
+                total = usage.get("total_tokens")
+            except Exception:
+                pass
+            self.record_usage(total)
+
+        return {"request": [on_request], "response": [on_response]}
 
     def record_session(self, execution):
         self.state["sessions"].append(execution)

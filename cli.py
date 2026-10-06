@@ -20,7 +20,7 @@ from rich.table import Table
 
 import evaluator_v2
 from benchmark import run_benchmark, prepare_benchmark
-from benchmark_checkpoint import BenchmarkCheckpoint
+from benchmark_checkpoint import BenchmarkCheckpoint, BudgetExhausted
 from dataset_builder import build_dataset, write_dataset
 from fold_builder import load_folds
 from historical_baseline import build_historical_predictions, build_post_fix_baseline_predictions
@@ -236,6 +236,12 @@ def _run_benchmark(args: argparse.Namespace) -> None:
         base_url=base_url, verify_ionos=not args.no_verify_ionos,
         revisable_variant=args.revisable_variant,
     )
+    limits = {"max_wall_seconds": args.max_wall_seconds, "max_total_tokens": args.max_total_tokens,
+              "max_http_attempts": args.max_http_attempts}
+    if any(value is not None for value in limits.values()):
+        if args.dry_run:
+            raise ValueError("Run budgets apply to durable live runs, not dry preparation")
+        preparation["budget"] = limits
     if args.dry_run:
         expected, manifest = prepare_benchmark(**preparation, output_path=args.output, dry_run=True)
         console.print(f"Prepared {len(expected)} expected pairs; run_id={manifest['run_id']}")
@@ -251,22 +257,31 @@ def _run_benchmark(args: argparse.Namespace) -> None:
             predictions = checkpoint.export_partial()
             console.print("Explicit partial evaluation against the full original expected cohort.")
         else:
-            asyncio.run(run_benchmark(
-            source=source,
-            base_url=base_url,
-            model_name=model_name,
-            api_key=api_key,
-            enable_thinking=args.enable_thinking,
-            verifier_enabled=args.verifier,
-            mode=args.mode,
-            revisable_variant=args.revisable_variant,
-            verify_ionos=not args.no_verify_ionos,
-            limit=args.limit,
-            run_id=manifest["run_id"],
-                checkpoint=checkpoint,
-            ))
-            predictions = checkpoint.publish()
-            console.print(f"[green]Wrote {len(predictions)} predictions to {args.output}[/green]")
+            try:
+                asyncio.run(run_benchmark(
+                    source=source,
+                    base_url=base_url,
+                    model_name=model_name,
+                    api_key=api_key,
+                    enable_thinking=args.enable_thinking,
+                    verifier_enabled=args.verifier,
+                    mode=args.mode,
+                    revisable_variant=args.revisable_variant,
+                    verify_ionos=not args.no_verify_ionos,
+                    limit=args.limit,
+                    run_id=manifest["run_id"],
+                    checkpoint=checkpoint,
+                ))
+            except BudgetExhausted as stop:
+                predictions = checkpoint.export_partial()
+                console.print(
+                    f"[yellow]Run budget exhausted ({stop.reason}) after {checkpoint.completed_comments} "
+                    f"comments; partial results saved and scored against the full expected cohort. "
+                    f"The budget is persisted, so resuming will not continue this run.[/yellow]"
+                )
+            else:
+                predictions = checkpoint.publish()
+                console.print(f"[green]Wrote {len(predictions)} predictions to {args.output}[/green]")
 
     reference_path = Path(args.reference)
     if reference_path.exists():
@@ -425,6 +440,12 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_parser.add_argument("--evaluate-partial", action="store_true", help="With --resume, export and score saved comments against the full original cohort without inference.")
     benchmark_parser.add_argument("--role", choices=["primary", "secondary", "all"], default="primary")
     benchmark_parser.add_argument("--tiers", choices=["A", "A+B", "B"], default="A+B")
+    benchmark_parser.add_argument("--max-wall-seconds", type=int, default=None,
+                                  help="Absolute run deadline from the first start; never reset on resume.")
+    benchmark_parser.add_argument("--max-total-tokens", type=int, default=None,
+                                  help="Soft limit on client-visible total tokens; an in-flight request can overshoot.")
+    benchmark_parser.add_argument("--max-http-attempts", type=int, default=None,
+                                  help="Hard limit on completion requests, including retries, reserved before sending.")
 
     historical_parser = subparsers.add_parser(
         "historical-baseline",

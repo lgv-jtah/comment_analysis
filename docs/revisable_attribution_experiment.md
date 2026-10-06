@@ -171,6 +171,16 @@ Benchmark prepares the full source-selected expected cohort independently of rol
 Omitting `--expected-cohort` in evaluation selects the reference cohort, not the surviving prediction rows, so a subset run can accrue failures for the rest of the reference.
 Use `--folds ""` only when intentionally scoring without fold grouping; a missing specified folds file also falls back to ungrouped evaluation with a warning.
 
+### Run Budgets
+
+Live `benchmark` runs accept optional aggregate limits: `--max-wall-seconds`, `--max-total-tokens`, and `--max-http-attempts`.
+The limits are part of the fingerprinted manifest, so a resume must repeat them exactly and cannot raise them; they cannot be combined with `--dry-run`.
+`--max-wall-seconds` becomes an absolute deadline when the run first starts; it includes downtime and is never reset on resume.
+`--max-http-attempts` counts completion requests sent through the run's client, including retries, and reserves each one durably in the checkpoint before it is sent; the single route-metadata check is not counted.
+`--max-total-tokens` sums client-visible `usage.total_tokens`; responses without usage are counted separately as unknown, and a request in flight when the limit is reached can overshoot it, so it is a soft limit, not a billing cap.
+Limits are checked before every comment and every request; when one is used up the run stops with a persisted `stop_reason`, exports the completed prefix to `run.partial.parquet`, and scores it against the full expected cohort.
+Because the counters and stop reason persist, resuming an exhausted run stops again immediately; a larger budget needs a fresh output basename.
+
 ## Scoring Contract
 
 - Score unique expected pairs, left-joining predictions so absent predictions become `failed` and remain in eligible accuracy denominators.
@@ -496,4 +506,4 @@ The smoke used one synthetic three-target comment and expected `in_favor`, `agai
 Logical calls and HTTP attempts were reserved durably before dispatch; HTTP counts include metadata GETs and completion POSTs, including retries, but not unknown proxy-internal attempts.
 The absolute persisted deadline includes downtime and is never reset on resume, and saved counters survive resume, so a consumed budget cannot be refreshed by restarting.
 Observed token budgets are soft lower bounds, missing usage remains unknown, and an in-flight request may overshoot; they are not hard billing caps.
-The built-in `cli.py benchmark` shares durable checkpointing and bounded per-request retries/timeouts but has no aggregate logical-call, HTTP-attempt, token-budget, or absolute-deadline flags and does not enforce these helper-specific budgets.
+At the time of these runs the built-in `cli.py benchmark` had no aggregate budget flags; it has since gained `--max-wall-seconds`, `--max-total-tokens`, and `--max-http-attempts` (see [Run Budgets](#run-budgets)), which cover wall-clock, token, and HTTP-attempt limits but not a separate logical-call limit.
