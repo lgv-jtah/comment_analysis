@@ -24,7 +24,7 @@ Multiple targets may have explicit directional stances at once.
 
 | Attribution | Required decision and deterministic treatment |
 | --- | --- |
-| `explicit_target` | Requires `in_favor` or `against` and comment evidence; retains its stance ahead of global approval. |
+| `explicit_target` | Requires `in_favor` or `against` and comment evidence; retains its stance ahead of global approval. Under valid revised general support, `in_favor` whose every quote lies inside the revised scope evidence records `basis=general_approval` instead. |
 | `explicit_exclusion` | Requires a stance, including an allowed `neutral`, and comment evidence for the exception; retains its stance ahead of global approval. |
 | `unaddressed` | Allows `neutral` or null from the model; becomes `in_favor` under valid revised general support, otherwise `neutral`. |
 | `no_position` | Allows `neutral` or null from the model; follows the same inheritance rule as `unaddressed`. |
@@ -32,6 +32,9 @@ Multiple targets may have explicit directional stances at once.
 
 General support means revised `whole_contribution_approval`, or revised `mixed_qualified` with `general_support_extends_to_unaddressed=true`, supported by nonempty comment evidence.
 Inherited support records `basis=general_approval` with revised scope evidence and explanation; merely omitting a target is not an explicit exclusion.
+Models may instead label a blanket approval such as "Stimmt" as `explicit_target`/`in_favor` for every target, quoting the same span.
+Support that quotes only text inside the revised general-support evidence (`policy.restates_general_approval`, whitespace-normalized containment) is therefore recorded as `general_approval` with the scope evidence; the label is unchanged, and the target explanation is kept when nonempty.
+Any quote outside that evidence, any `against` stance, and any `explicit_exclusion` keep their explicit attribution.
 General rejection never propagates automatically, and topic overlap, sentiment, or confirmation of a problem does not establish support for a solution.
 
 Every supplied quote must be nonempty and match a substring after whitespace normalization: comment evidence against the comment, and source evidence against that target's own `related_sentences`.

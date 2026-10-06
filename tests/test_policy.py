@@ -10,9 +10,16 @@ construction also validates the prompt-loading path end to end.
 """
 import asyncio
 
+import pytest
+
 from context_builder import KeyMessageRef, build_comment_context
 from llm_handler import LLMHandler
-from policy import OneCallPolicyEngineV2, StancePolicyEngineV2, _format_key_messages_block
+from policy import (
+    OneCallPolicyEngineV2,
+    StancePolicyEngineV2,
+    _format_key_messages_block,
+    restates_general_approval,
+)
 
 
 def _make_engine(monkeypatch, call_model=None, verifier_enabled=False) -> StancePolicyEngineV2:
@@ -238,6 +245,65 @@ def test_mixed_qualified_without_extension_leaves_unaddressed_neutral(monkeypatc
 
     assert by_id[km1_id].final_stance == "in_favor"
     assert by_id[km2_id].final_stance == "against"
+
+
+def _mixed_extension_engine(monkeypatch, target_evidence, stance="in_favor"):
+    context = _context(comment_text="Stimmt. Und mehr Fahrradständer wären toll.")
+    km1_id, km2_id = [km.key_message_id for km in context.key_messages]
+
+    async def call_model(*, response_schema, **kwargs):
+        if response_schema.__name__ == "ScopeAttributionResult":
+            return _scope_response(
+                scope_type="mixed_qualified",
+                affected_key_message_ids=[km1_id],
+                general_support_extends_to_unaddressed=True,
+                comment_evidence=["Stimmt."],
+            )
+        return _stance_response([{
+            "key_message_id": km1_id, "stance": stance, "neutral_basis": None,
+            "comment_evidence": target_evidence, "source_evidence": [], "explanation": "Zustimmung.",
+        }])
+
+    results = _run(_make_engine(monkeypatch, call_model), context)
+    return {r.key_message_id: r for r in results}[km1_id]
+
+
+def test_mixed_qualified_support_quoting_only_general_evidence_is_general_approval(monkeypatch):
+    result = _mixed_extension_engine(monkeypatch, ["Stimmt."])
+
+    assert result.final_stance == "in_favor"
+    assert result.basis == "general_approval"
+    assert result.comment_evidence == ["Stimmt."]
+
+
+def test_mixed_qualified_target_specific_evidence_stays_explicit(monkeypatch):
+    result = _mixed_extension_engine(monkeypatch, ["Stimmt.", "mehr Fahrradständer wären toll"])
+
+    assert result.basis == "explicit_target"
+
+
+def test_mixed_qualified_opposition_quoting_general_evidence_stays_explicit(monkeypatch):
+    result = _mixed_extension_engine(monkeypatch, ["Stimmt."], stance="against")
+
+    assert result.final_stance == "against"
+    assert result.basis == "explicit_target"
+
+
+@pytest.mark.parametrize(
+    "target, general, expected",
+    [
+        (["Stimmt"], ["Stimmt"], True),
+        (["gut"], ["Alles gut"], True),
+        (["Alles\n gut"], ["Alles gut"], True),
+        (["Alles gut", "Parken nein"], ["Alles gut"], False),
+        (["Alles gut, aber Parken"], ["Alles gut"], False),
+        ([], ["Alles gut"], False),
+        (["Alles gut"], [], False),
+        (["  "], ["Alles gut"], False),
+    ],
+)
+def test_restates_general_approval(target, general, expected):
+    assert restates_general_approval(target, general) is expected
 
 
 # ---------------------------------------------------------------------------

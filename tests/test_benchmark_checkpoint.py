@@ -507,14 +507,18 @@ def test_real_revisable_outputs_commit_interrupt_resume(tmp_path, monkeypatch, v
     assert [row['basis'] for row in prefix[:6]] == ['explicit_exclusion'] * 6
     for i, (basis, label, uncertainty) in enumerate(cases[:-1]):
         row = prefix[2 * i]
+        # Every target quotes the whole-approval evidence, so unaddressed targets
+        # inherit it and explicit support records inherited provenance.
+        inherited = basis in ('unaddressed', 'no_position') or (basis, label) == ('explicit_target', 'in_favor')
         if basis in ('schema', 'failed'):
             assert row['basis'] is row['proposed_stance'] is row['final_stance'] is None
         elif uncertainty or basis == 'unresolved':
             assert row['status'] == 'needs_review' and row['final_stance'] is None
             assert row['proposed_stance'] == ('in_favor' if basis in ('unaddressed', 'no_position') else label)
-            assert row['basis'] == ('general_approval' if basis in ('unaddressed', 'no_position') else basis)
+            assert row['basis'] == ('general_approval' if inherited else basis)
         else:
             assert row['status'] == 'accepted' and row['final_stance'] == label
+            assert row['basis'] == ('general_approval' if inherited else basis)
         if basis not in ('schema', 'failed'):
             assert row['comment_evidence'] == [f'Comment {i}']
             assert row['source_evidence'] == ['Target a']

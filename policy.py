@@ -56,6 +56,21 @@ def _normalize_whitespace(text: str) -> str:
     return " ".join(text.split())
 
 
+def restates_general_approval(target_evidence: list[str], general_evidence: list[str]) -> bool:
+    """Whether target support rests only on the general-approval evidence.
+
+    A model may label a blanket approval such as "Stimmt" as explicit support
+    for every key message, quoting the same span each time. Support whose
+    every quote lies inside the comment-wide approval evidence adds nothing
+    target-specific, so its provenance is inherited general approval, not an
+    explicit target position. Any quote outside that evidence keeps the
+    explicit attribution.
+    """
+    general = [_normalize_whitespace(quote) for quote in general_evidence if quote.strip()]
+    target = [_normalize_whitespace(quote) for quote in target_evidence if quote.strip()]
+    return bool(general) and bool(target) and all(any(quote in span for span in general) for quote in target)
+
+
 @dataclass
 class PairOutput:
     """One (comment, key message) result, matching the brief section 7 contract.
@@ -401,13 +416,21 @@ class StancePolicyEngineV2:
                                 context, km, ["target_missing_from_stance_result"]
                             )
                             continue
+                        evidence = target.comment_evidence
                         if target.stance == StanceLabelV2.NEUTRAL:
                             basis = target.neutral_basis.value if target.neutral_basis else NeutralBasis.NO_POSITION.value
+                        elif (
+                            target.stance == StanceLabelV2.IN_FAVOR
+                            and scope.scope_type == ScopeType.MIXED_QUALIFIED
+                            and scope.general_support_extends_to_unaddressed
+                            and restates_general_approval(target.comment_evidence, scope.comment_evidence)
+                        ):
+                            basis, evidence = "general_approval", scope.comment_evidence
                         else:
                             basis = "explicit_target"
                         outputs[km.key_message_id] = _accepted(
                             context, km, target.stance, basis,
-                            target.comment_evidence, target.source_evidence, target.explanation,
+                            evidence, target.source_evidence, target.explanation,
                         )
 
         for km in kms:

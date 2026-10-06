@@ -100,6 +100,15 @@ comment, then applies the general-approval rule deterministically in code
    whether it's because the key message was unaddressed or because the
    comment took no position on it.
 
+Basis records provenance, not just the label. Under `mixed_qualified` with
+`general_support_extends_to_unaddressed=true`, an `in_favor` target whose
+every comment quote lies inside the scope's general-support evidence
+(`restates_general_approval`) is recorded as `general_approval`, not
+`explicit_target`: it adds nothing target-specific. Without this, blanket
+approvals quoted per target hide the general-approval/historical-label
+divergence inside the `explicit_target` row of the reporting rule below.
+The revisable-attribution engine applies the same rule.
+
 Failed or invalid LLM output (wrong enum, a key-message ID that doesn't
 exist in this comment's context, evidence that isn't an exact substring of
 the comment or its key message's related sentences) never becomes a silent

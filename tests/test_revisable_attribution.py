@@ -80,6 +80,55 @@ def test_general_approval_inherits_only_without_explicit_exception(attribution):
     assert all(o.final_stance == "neutral" and o.basis == attribution for o in outputs)
 
 
+def blanket_support(revised_scope, evidence=("Alles gut",), stance="in_favor", explanation="Zustimmung."):
+    return dict(revised_scope=revised_scope, targets=[
+        dict(key_message_id=km.key_message_id, attribution="explicit_target", stance=stance,
+             comment_evidence=list(evidence), explanation=explanation)
+        for km in context().key_messages
+    ])
+
+
+@pytest.mark.parametrize("revised_scope", [
+    scope(), scope("mixed_qualified", general_support_extends_to_unaddressed=True),
+])
+@pytest.mark.parametrize("evidence", [("Alles gut",), ("gut",), ("Alles  gut",)])
+def test_explicit_support_quoting_only_general_evidence_is_general_approval(revised_scope, evidence):
+    outputs, _ = run(scope(), blanket_support(revised_scope, evidence))
+    assert all(o.status == "accepted" and o.final_stance == "in_favor" for o in outputs)
+    assert all(o.basis == "general_approval" and o.comment_evidence == ["Alles gut"] for o in outputs)
+    assert all(o.explanation == "Zustimmung." for o in outputs)
+
+
+@pytest.mark.parametrize("revised_scope", [
+    scope("target_specific"), scope("mixed_qualified", general_support_extends_to_unaddressed=False),
+    scope("mixed_qualified"),
+])
+def test_explicit_support_without_general_support_stays_explicit(revised_scope):
+    outputs, _ = run(scope(), blanket_support(revised_scope))
+    assert all(o.final_stance == "in_favor" and o.basis == "explicit_target" for o in outputs)
+
+
+def test_target_specific_evidence_or_opposition_stays_explicit():
+    outputs, _ = run(scope(), blanket_support(scope(), ("Alles gut", "Parken nein")))
+    assert all(o.basis == "explicit_target" and o.comment_evidence == ["Alles gut", "Parken nein"]
+               for o in outputs)
+    outputs, _ = run(scope(), blanket_support(scope(), stance="against"))
+    assert all(o.final_stance == "against" and o.basis == "explicit_target" for o in outputs)
+
+
+@pytest.mark.parametrize("global_explanation", ["Revidierte allgemeine Zustimmung.", ""])
+def test_relabelled_support_explanation_falls_back_and_review_keeps_provenance(global_explanation):
+    response = blanket_support(scope(explanation=global_explanation), explanation="")
+    response["targets"][0]["uncertainty_flags"] = ["suspected_sarcasm"]
+    outputs, _ = run(scope(), response)
+    assert outputs[0].status == "needs_review" and outputs[0].final_stance is None
+    assert outputs[0].proposed_stance == "in_favor"
+    assert all(o.basis == "general_approval" for o in outputs)
+    assert all(o.explanation == (global_explanation or
+               "Allgemeine Zustimmung zum gesamten Beitrag wird auf diese Kernaussage uebertragen.")
+               for o in outputs)
+
+
 @pytest.mark.parametrize("failure_stage", [1, 2])
 def test_failed_call_fails_safely_without_neutral_fallback(failure_stage):
     outputs, handler = run(None if failure_stage == 1 else scope(), None)
