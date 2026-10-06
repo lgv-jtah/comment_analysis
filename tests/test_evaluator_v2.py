@@ -155,10 +155,9 @@ def test_unmatched_predictions_are_counted_not_silently_dropped():
 
     metrics = evaluate(predictions, reference)
 
-    assert metrics.total_pairs == 2
+    assert metrics.total_pairs == 1
     assert metrics.unmatched_prediction_pairs == 1
-    # The unmatched pair has no resolution_status match ("resolved"), so it's
-    # excluded from eligible_pairs but still counts toward total_pairs.
+    assert metrics.unexpected_prediction_pairs == 1
     assert metrics.eligible_pairs == 1
 
 
@@ -168,11 +167,12 @@ def test_empty_predictions_do_not_raise():
 
     metrics = evaluate(empty, reference)
 
-    assert metrics.total_pairs == 0
-    assert metrics.eligible_pairs == 0
+    assert metrics.total_pairs == 7
+    assert metrics.eligible_pairs == 5
+    assert metrics.failed_pairs == metrics.missing_prediction_pairs == 7
     assert metrics.forced_choice_accuracy == 0.0
     assert metrics.accepted_accuracy is None
-    assert metrics.per_class == {}
+    assert len(metrics.per_class) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -302,7 +302,7 @@ def test_pooled_out_of_fold_concatenates_before_scoring():
 
     pooled = pooled_out_of_fold([fold_a, fold_b], reference)
 
-    assert pooled.eligible_pairs == 2
+    assert pooled.eligible_pairs == 5
     assert pooled.accepted_correct == 2
 
 
@@ -311,7 +311,7 @@ def test_pooled_out_of_fold_empty_list():
 
     pooled = pooled_out_of_fold([], reference)
 
-    assert pooled.total_pairs == 0
+    assert pooled.total_pairs == 7
 
 
 # ---------------------------------------------------------------------------
@@ -354,10 +354,8 @@ def test_evaluate_by_fold_splits_by_test_contribution_ids():
 
 
 def test_evaluate_by_fold_empty_folds_list():
-    result = evaluate_by_fold(_predictions(), _reference(), _FakeFoldAssignment(folds=[]))
-
-    assert result["per_fold"] == []
-    assert result["pooled"].total_pairs == 0
+    with pytest.raises(ValueError, match="Missing fold assignments"):
+        evaluate_by_fold(_predictions(), _reference(), _FakeFoldAssignment(folds=[]))
 
 
 # ---------------------------------------------------------------------------
@@ -389,12 +387,12 @@ def test_bootstrap_ci_reproducible_for_same_seed():
     assert a == b
 
 
-def test_bootstrap_ci_no_contribution_ids_collapses_to_point_estimate():
+def test_bootstrap_ci_missing_predictions_still_samples_expected_contributions():
     empty = pd.DataFrame(columns=["pair_id", "contribution_id", "status", "proposed_stance", "final_stance"])
 
     ci = bootstrap_ci(empty, _reference(), n_iterations=50)
 
-    assert ci.n_iterations == 0
+    assert ci.n_iterations == 50
     assert ci.lower == ci.upper == ci.point_estimate
 
 

@@ -381,16 +381,16 @@ def resolve_cohort_a(
         primary = [p for p in provisional if p.cohort_role == "primary"]
         secondary = [p for p in provisional if p.cohort_role == "secondary"]
 
-        if primary and secondary:
-            primary_labels = {p.reference_label for p in primary if p.reference_label}
-            secondary_labels = {p.reference_label for p in secondary if p.reference_label}
-            if primary_labels and secondary_labels and primary_labels != secondary_labels:
-                for p in primary + secondary:
-                    p.resolution_status = "quarantined"
-                    p.quarantine_reason = "evaluator_disagreement"
-                    p.tier = None
-                    p.reference_label = None
-                    p.basis = None
+        labels = {p.reference_label for p in provisional if p.reference_label}
+        if len(labels) > 1:
+            for p in provisional:
+                p.resolution_status = "quarantined"
+                p.quarantine_reason = (
+                    "evaluator_disagreement" if primary and secondary else "conflicting_annotations"
+                )
+                p.tier = None
+                p.reference_label = None
+                p.basis = None
 
         resolved.extend(provisional)
 

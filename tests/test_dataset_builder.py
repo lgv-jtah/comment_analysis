@@ -179,6 +179,19 @@ def test_correct_verdict_uses_established_original():
     assert resolved[0].basis == "verdict_correct"
 
 
+def test_same_evaluator_conflicts_quarantined_without_losing_annotation_provenance():
+    df = pd.DataFrame([
+        _eval_row(id=1, verdict="incorrect", corrected_label="neutral", comment="first note"),
+        _eval_row(id=2, verdict="incorrect", corrected_label="against", comment="second note"),
+    ])
+    before = df.copy(deep=True)
+    resolved = resolve_cohort_a(df, {df.iloc[0].pair_id: StanceLabelV2.IN_FAVOR})
+    assert len(resolved) == 2
+    assert all(p.resolution_status == "quarantined" for p in resolved)
+    assert all(p.quarantine_reason == "conflicting_annotations" for p in resolved)
+    pd.testing.assert_frame_equal(df, before)
+
+
 def test_resolve_cohort_a_threads_post_fix_original_label():
     df = pd.DataFrame([_eval_row(verdict="correct")])
     pair_id = df.iloc[0]["pair_id"]
