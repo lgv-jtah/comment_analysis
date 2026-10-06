@@ -173,7 +173,11 @@ inference) puts GPT-OSS-120B at 65-82 of 119 correct automatic answers
 under this rule, compared with 63 under the old one; the range comes from
 not knowing the model's scope on saved rows. The rule was chosen after
 inspecting this development cohort, so these numbers are indicative, not
-held-out results; fresh runs are required for reportable figures.
+held-out results. Two live fold-0 runs then measured 69 and, after a
+prompt revision, 74 of 119 correct automatic answers (forced choice 87
+and 90); see the "Option C Fold-0 Runs" section of
+[Revisable Attribution Experiment](revisable_attribution_experiment.md).
+Reportable figures require the held-out folds 1-4.
 
 General rejection ("Bitte nicht.", noted by the annotator as "allgemeine
 ablehnende Reaktion") is unchanged by this decision: rule 7 still applies,

@@ -395,9 +395,9 @@ def test_response_schema_and_prompt_hashes_unchanged():
     ]:
         assert hashlib.sha256(json.dumps(schema.model_json_schema(), sort_keys=True).encode()).hexdigest() == digest
     for filename, digest in [
-        ("revisable_attribution_system.txt", "47b5fadaeb6301f6fed05cb5a7fd680bbef4d5d11aca9aad2db7bdf22942eb11"),
+        ("revisable_attribution_system.txt", "70058ec56f9f0c93a62e1f5fb2fc8f83984dc4cb483733db988e7dcae39a62fa"),
         ("global_hypothesis_user.txt", "e4f1e3dc74e3dfc6f91f9deffce575b00cb7ebf06d977d6fdc98d484d9269da3"),
-        ("revised_attribution_user.txt", "16f78512027de07ce9fd86ceaf9e29da58e0808fb09d967511652b40712ede95"),
+        ("revised_attribution_user.txt", "fe51530b3d1eb9d6b612c27ad607d863d85f87141e417d30791c239ddb42d4c4"),
     ]:
         assert hashlib.sha256((Path(PROMPT_CONFIG).parent / filename).read_bytes()).hexdigest() == digest
 

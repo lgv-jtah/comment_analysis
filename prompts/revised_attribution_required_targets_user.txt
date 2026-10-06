@@ -4,7 +4,7 @@ targets ist ein Objekt, keine Liste: Jeder Schluessel ist eine Original-key_mess
 attribution:
 explicit_target: explizite Zustimmung oder Ablehnung der Proposition, stance in_favor oder against und nichtleere comment_evidence.
 explicit_exclusion: belegte Ausnahme von allgemeiner Zustimmung, auch neutral ist erlaubt; stance und nichtleere comment_evidence sind Pflicht. Ein bloss nicht erwaehntes Ziel ist KEINE Ausnahme.
-unaddressed: nicht angesprochen, stance neutral oder null; gueltige globale Zustimmung wird erst durch die Orchestrierung vererbt.
+unaddressed: nicht eigens inhaltlich angesprochen, auch wenn der Kommentar dem Beitrag allgemein zustimmt; stance neutral oder null; gueltige globale Zustimmung wird erst durch die Orchestrierung erfasst. explicit_target nie mit stance neutral.
 no_position: angesprochen ohne eigene Position, stance neutral oder null.
 unresolved: Bezug oder Position unklar; uncertainty_flags nennen. Eine vertretbare stance darf mit nichtleerer comment_evidence als Review-Vorschlag erhalten bleiben.
 Explizite Positionen und Ausnahmen haben Vorrang vor allgemeiner Zustimmung. Ohne Ausnahme erbt ein Ziel nur gueltige revidierte globale Zustimmung, nie globale Ablehnung.

@@ -446,6 +446,23 @@ Simulating option C, GPT-OSS gets 65 to 82 correct automatic answers out of 119 
 The range exists because saved rows do not record the model's scope decision.
 The rule was chosen after inspecting this cohort, so these are development-set simulations; fresh runs under the current engine are required for reportable numbers.
 
+### Option C Fold-0 Runs (2026-10-06)
+
+Two live GPT-OSS-120B runs on the same frozen fold-0 cohort then measured the current engine, with the same mode, variant, decoding and IONOS route as the comparison above.
+
+| Run | Correct automatic | Accepted accuracy | Forced-choice correct | Eligible pairs in review |
+| --- | --- | --- | --- | --- |
+| 2026-09-29 comparison (old rule) | 63/119 | 0.606 (104 accepted) | 77 | 15 |
+| [`fold0_gptoss-120b_optionc_20261006_live`](../dataset/experiments/fold0_gptoss-120b_optionc_20261006_live.primary_AB.metrics.json) (option C, first prompt wording) | 69/119 | 0.750 (92 accepted) | 87 | 27 |
+| [`fold0_gptoss-120b_optionc_prompt2_20261006_live`](../dataset/experiments/fold0_gptoss-120b_optionc_prompt2_20261006_live.primary_AB.metrics.json) (option C, revised prompt wording) | 74/119 | 0.733 (101 accepted) | 90 | 18 |
+| Legacy post-fix (verified-by-construction reference) | 87/119 | 0.731 (119 accepted) | 87 | 0 |
+
+The first run fixed every blanket-approval pair but attributed explicit support less often, failed the stage-2 schema on "Warum nicht!" (the model most likely paired `explicit_target` with `neutral`), and sent more comments to review.
+The revised wording removes the sentence that discouraged `explicit_target`, defines general approval as approval without content of its own whose key messages are `unaddressed`, rules out `explicit_target` with `neutral`, and states that confirming a key message's problem or need with content or observations is `in_favor` for that key message.
+Remaining accepted errors are mostly implied support still read as `unaddressed`, borderline general approval where the annotator's own labels vary, and a few over-attributions.
+Between the two option C runs 17 pairs flipped to correct and 12 to wrong, almost all on borderline comments, so a single temperature-0.1 run moves by roughly five pairs on its own.
+Fold-0 tuning stops here: further prompt changes on these 40 comments would mostly fit that noise, and the engine is frozen for a single held-out run on folds 1-4.
+
 ### Artifacts And Reuse
 
 Committed: the GPT-OSS predictions and expected cohort, the Qwen partial predictions and expected cohort, the Nemo screening predictions and expected cohort, and the saved analysis directory.
