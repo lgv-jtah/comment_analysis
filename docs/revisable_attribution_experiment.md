@@ -4,7 +4,7 @@
 
 `--mode revisable_attribution` opts into an experimental architecture implementing the same [stance policy v2](stance_policy_v2.md), not a new labeling policy.
 The initial validation handoff reported 679 passing tests from `uv run pytest --cov` plus eight independent probes; this was software validation, not an inference or accuracy result.
-No broad experiment run has been completed; the later [matched fold-0 screening summary](../dataset/experiments/screening_fold0_mistral-nemo_matched_20260928T102005Z.summary.json) records verified routing and schema-valid responses for that historical run, not a current readiness guarantee.
+No broad experiment run has been completed; the [checkpointed model comparison](#checkpointed-model-comparison) is a 40-comment fold-0 development run; the later [matched fold-0 screening summary](../dataset/experiments/screening_fold0_mistral-nemo_matched_20260928T102005Z.summary.json) records verified routing and schema-valid responses for that historical run, not a current readiness guarantee.
 Pre-variant report numbers remain historical results under their original code, prompts, cohorts, and scoring contracts, not measurements of the A/B variants described below.
 Fold 0 has been used for development and tuning and is not an untouched holdout, even where CLI output calls its grouping "out-of-fold".
 Do not rewrite old results or claim an independently validated accuracy improvement from policy fixtures or these tests.
@@ -398,55 +398,85 @@ Offline byte overhead is recorded in the selection, not measured live token over
 
 ## Checkpointed Model Comparison
 
-The current offline-prepared reservation prefix is `model_comparison_checkpointed_20260929T064921105737Z`, with separate `gptoss-120b` and `qwen35-397b` prepared JSON files under `/tmp/opencode`.
-The fresh full comparison has not yet run.
-The previously passed Qwen smoke from `20260929T062257210845Z` is reused through read-only hash, route, and same-wire-contract checks with zero new calls, not claimed as a fresh smoke or full-comparison result.
-The earlier evidence-ID fold-0 screening and interrupted GPT-OSS attempt remain historical records under their original contracts, not results of the new checkpointed runs.
-The comparison freezes `source_bound_evidence_ids`, 40 comments, 138 pairs, 23 contributions, and 119 eligible primary A+B reference pairs; fold 0 remains development data.
+The checkpointed comparison ran on 2026-09-29 under reservation prefix `model_comparison_checkpointed_20260929T064921105737Z`.
+GPT-OSS-120B completed and published; Qwen3.5-397B stopped partway because of provider errors and cannot be resumed.
+Both runs used `source_bound_evidence_ids` on the frozen fold-0 cohort of 40 comments, 138 pairs, 23 contributions, and 119 eligible primary A+B reference pairs; fold 0 remains development data.
+Both runs predate the 2026-10-06 general-approval changes described in [Stance policy v2](stance_policy_v2.md): their `general_approval` rows carry `in_favor`, and blanket approval quoted per target is still labelled `explicit_target`.
+Their saved scores are historical results under the old rule, not measurements of the current engine.
 
-Checkpoint validation now accepts the engine's `explicit_exclusion` basis, including neutral exclusions, alongside `general_approval`, `explicit_target`, `unaddressed`, and `no_position`.
+### Execution
+
+| Run | Outcome | Calls and HTTP attempts | Known usage |
+| --- | --- | --- | --- |
+| `gptoss-120b` | Published: 40/40 comments, 138/138 pairs. | 80 logical calls, all returned; 81 HTTP requests (1 metadata, 80 completions, all HTTP 200 with `finish_reason=stop`), no client retries; about 916 seconds. | 244,283 total tokens, 100,934 completion. |
+| `qwen35-397b` | Not published: 36/40 comments, 125/138 pairs saved as a partial checkpoint. | 54 logical calls (31 returned, 22 null, 1 reserved and never completed); all 120 HTTP attempts used: 1 metadata, 32 HTTP 200, 6 HTTP 502, 81 HTTP 503 (the last 81 attempts consecutive), 65 client retries; about 5,947 seconds. | 257,554 total tokens, 200,823 completion; usage unknown for 87 error responses. |
+
+The Qwen run stopped when its 120-attempt HTTP budget was exhausted by IONOS 502/503 responses.
+Its persisted absolute deadline (2026-09-29 11:10:55 CEST) has also passed, so the reservation can never be resumed.
+The run says nothing reliable about Qwen's stance quality: its full-cohort score mixes availability with semantics.
+Before any Qwen rerun, investigate the LiteLLM/IONOS serving path; no serving configuration was changed.
+
+### Results Against Historical Labels
+
+Read-only analysis: [`saved_model_comparison_analysis_20260929T090403579070Z`](../dataset/experiments/saved_model_comparison_analysis_20260929T090403579070Z/comparison.safe_summary.json), produced with no new inference requests and no label changes.
+Scores are on the 119 eligible primary A+B pairs; a correct automatic answer is an accepted pair whose final stance matches the reference label.
+
+| Run | Correct automatic | Incorrect automatic | Not accepted | Correct review proposals | Forced-choice correct |
+| --- | --- | --- | --- | --- | --- |
+| GPT-OSS-120B | 63 (52.9%) | 41 | 15 review | 14 | 77 |
+| Mistral-Nemo evidence-ID screening | 51 (42.9%) | 26 | 42 review | 16 | 67 |
+| Qwen3.5-397B partial | 14 (11.8%) | 15 | 13 review, 77 failed (12 eligible pairs missing) | 6 | 20 |
+| Legacy, pre-fix (`established_original_label`) | 89 (74.8%) | 30 | 0 | 0 | 89 |
+| Legacy, post-fix (`post_fix_original_label`) | 87 (73.1%) | 32 | 0 | 0 | 87 |
+
+The legacy rows are not an independent baseline.
+Reference labels come from a human verifying the legacy model's own output: a "correct" verdict makes the legacy label the reference (89 of these 119 pairs), and an "incorrect" verdict makes legacy wrong by construction.
+The legacy pre-fix score therefore equals the number of verdict-correct pairs, and the 19 cohort pairs where legacy was judged wrong without a usable correction are excluded as unresolved.
+
+The 2026-10-06 gap investigation decomposed GPT-OSS's 24-pair deficit against legacy post-fix as follows:
+
+- -17 pairs on 12 blanket-approval comments ("Stimmt", "Warum nicht!", ...), which the old rule labelled `in_favor` and the annotator mostly labelled `neutral`.
+- -14 pairs from review routing on `unresolved_scope` comments, where the withheld proposal matched the reference.
+- +7 pairs on all other comments, where GPT-OSS's proposals beat legacy post-fix.
+
+This led to the basis-provenance fix and the option C decision in [Stance policy v2](stance_policy_v2.md).
+[`basis_rescore.py`](../basis_rescore.py) re-scores these saved predictions offline.
+The basis fix alone moves GPT-OSS `explicit_target` accepted accuracy from 35/66 to 27/31 without changing any label.
+Simulating option C, GPT-OSS gets 65 to 82 correct automatic answers out of 119 ([summary](../dataset/experiments/basis_rescore_20261006T084723083505Z.safe_summary.json)).
+The range exists because saved rows do not record the model's scope decision.
+The rule was chosen after inspecting this cohort, so these are development-set simulations; fresh runs under the current engine are required for reportable numbers.
+
+### Artifacts And Reuse
+
+Committed: the GPT-OSS predictions and expected cohort, the Qwen partial predictions and expected cohort, the Nemo screening predictions and expected cohort, and the saved analysis directory.
+The checkpoints, manifests, locks, and telemetry of both runs remain local, untracked files under `dataset/experiments/`.
+The earlier interrupted GPT-OSS attempt `model_comparison_checkpointed_20260929T062257210845Z_gptoss-120b_full` (four comments, nine pairs) is preserved unchanged and was not merged into the published run.
+The previously passed Qwen smoke from `20260929T062257210845Z` was reused through read-only hash, route, and same-wire-contract checks, not repeated.
+
+The run helper `/tmp/opencode/model_comparison_checkpointed_20260929.py` (SHA-256 `f7c085a276cb6193293949fed5fccbd7c31cfc66d91c54ed6badd76669e62773`) and both prepared JSON files lived in a temporary directory and no longer exist.
+Together with the changed implementation and prompt hashes, this means neither reservation can be checked, run, or resumed again.
+Do not edit recorded hashes or migrate rows into a new run.
+A new comparison needs a fresh reservation and a helper kept in the repository rather than in a temporary directory.
+
+Checkpoint validation accepts the engine's `explicit_exclusion` basis, including neutral exclusions, alongside `general_approval`, `explicit_target`, `unaddressed`, and `no_position`.
 Valid review rows retain their proposed stance, basis (including `unresolved` or null), evidence, and explanation, but never a final stance; unknown bases and invalid status/stance combinations remain rejected.
-Offline tests exercise actual engine outputs with mocked model responses through checkpoint commit, reload/resume, partial export, and final publication, including the formerly blocked fifth comment and the full frozen cohort.
-The old GPT-OSS checkpoint `model_comparison_checkpointed_20260929T062257210845Z_gptoss-120b_full` and its four completed comments/nine pairs remain preserved unchanged.
-Its implementation/helper contract has changed, so it cannot resume under the fixed contract: do not edit hashes, bypass checks, or migrate its rows into the new run; use the fresh reservation.
+Offline tests exercise actual engine outputs with mocked model responses through checkpoint commit, reload/resume, partial export, and final publication.
 
-`/tmp/opencode/model_comparison_checkpointed_20260929.py` is a temporary, machine-specific helper with absolute paths, not a portable or installed project CLI.
-Its SHA-256 is `f7c085a276cb6193293949fed5fccbd7c31cfc66d91c54ed6badd76669e62773`.
-Its `check`, `run`, and `resume` commands require `--prepared PATH --prepared-sha256 SHA256`, with `--kind full|smoke`; only `resume` accepts `--recover-stale-lock`, and `--evaluate-partial` requires `resume --kind full`.
-`prepare` creates fresh offline reservations, not inference; preserve the current approved files and their recorded hashes instead of silently replacing them.
-The helper validates prepared/helper hashes, protected historical artifacts, frozen contracts, approved routes, and outgoing request bodies before proceeding.
-Terminal failure summaries distinguish `row_validation_failed`, `checkpoint_persistence_failed`, and allowlisted stop reasons, with fixed exception categories and `other` for unknown types/reasons.
-They retain safe counters without exception messages, tracebacks, raw model responses, or provider response text; cleanup failures do not replace the original failure category.
+### Execution Contract Used
 
-These are future full-run commands from the repository root, not commands executed for this update:
-
-```bash
-uv run /tmp/opencode/model_comparison_checkpointed_20260929.py run \
-  --prepared /tmp/opencode/model_comparison_checkpointed_20260929T064921105737Z_gptoss-120b.prepared.json \
-  --prepared-sha256 145852cccad3e83070761779b003bd54a0e6b17e70300d24c0536f4f95e27954 \
-  --kind full
-
-uv run /tmp/opencode/model_comparison_checkpointed_20260929.py run \
-  --prepared /tmp/opencode/model_comparison_checkpointed_20260929T064921105737Z_qwen35-397b.prepared.json \
-  --prepared-sha256 705eb32a1876a61db6bf2c81ec927b3acc178823f01ffa3951c77ede45739b12 \
-  --kind full
-```
-
-For offline preflight, replace `run` with `check`, keeping every argument unchanged.
-After starting a fresh run, resume only that same reservation by replacing `run` with `resume`; add `--recover-stale-lock` only after its prior writer has stopped, and add `--evaluate-partial` for offline partial scoring without inference.
-The request settings and budgets below are unchanged by the basis-validation and safe-diagnostics fixes.
+The helper's `check`, `run`, and `resume` commands required `--prepared PATH --prepared-sha256 SHA256` with `--kind full|smoke`; only `resume` accepted `--recover-stale-lock`, and `--evaluate-partial` required `resume --kind full`.
+It validated prepared/helper hashes, protected historical artifacts, frozen contracts, approved routes, and outgoing request bodies before proceeding.
+Terminal failure summaries distinguished `row_validation_failed`, `checkpoint_persistence_failed`, and allowlisted stop reasons, retaining safe counters without exception messages, tracebacks, raw model responses, or provider response text.
 
 | Helper execution | Limits |
 | --- | --- |
 | Full comparison, per model | 100 logical calls, 120 client-visible HTTP attempts, 7,200 seconds, 1,000,000 observed completion tokens, 2,000,000 observed total tokens. |
 | Qwen smoke | Two logical stage calls, three HTTP attempts including route metadata, at most 1,300 seconds, zero retries, unchanged `max_tokens=20000` per request. |
 
-Full runs allow 80 expected two-stage calls plus 20 replay calls, with at most three retries per logical call and retry delays capped at 30 seconds, including `Retry-After`.
-The unchanged per-request contract uses temperature `0.1`, `max_tokens=20000`, JSON-schema responses, concurrency one, backend-default reasoning with no thinking override, and no verifier or stage cache.
-The smoke uses one synthetic three-target comment and expected `in_favor`, `against`, `in_favor` under the pre-2026-10-06 general-approval rule (a rerun under the current rule would expect `neutral` for the inherited targets); its observed token thresholds remain 1,000,000 completion and 2,000,000 total tokens, not a reduced request limit.
-Logical calls and HTTP attempts are reserved durably before dispatch; HTTP counts include metadata GETs and completion POSTs, including retries, but not unknown proxy-internal attempts.
-The absolute persisted 7,200-second full-run deadline includes downtime and is never reset on resume; the smoke similarly retains its 1,300-second deadline.
-Observed token budgets are soft lower bounds, missing usage remains unknown, and an in-flight request may overshoot; these are not hard billing caps.
-Saved counters and deadlines survive resume, including interrupted-comment replay, so a consumed budget cannot be refreshed by restarting.
-The built-in `cli.py benchmark` shares durable checkpointing and bounded per-request retries/timeouts but has no aggregate logical-call, HTTP-attempt, token-budget, or absolute-deadline CLI flags and does not enforce these helper-specific budgets.
-Do not use the generic benchmark example as a substitute for this prepared high-budget comparison or resume a helper run through the built-in CLI with a different execution contract.
+Full runs allowed 80 expected two-stage calls plus 20 replay calls, with at most three retries per logical call and retry delays capped at 30 seconds, including `Retry-After`.
+The per-request contract used temperature `0.1`, `max_tokens=20000`, JSON-schema responses, concurrency one, backend-default reasoning with no thinking override, and no verifier or stage cache.
+The smoke used one synthetic three-target comment and expected `in_favor`, `against`, `in_favor` under the pre-2026-10-06 general-approval rule; a rerun under the current rule would expect `neutral` for the inherited targets.
+Logical calls and HTTP attempts were reserved durably before dispatch; HTTP counts include metadata GETs and completion POSTs, including retries, but not unknown proxy-internal attempts.
+The absolute persisted deadline includes downtime and is never reset on resume, and saved counters survive resume, so a consumed budget cannot be refreshed by restarting.
+Observed token budgets are soft lower bounds, missing usage remains unknown, and an in-flight request may overshoot; they are not hard billing caps.
+The built-in `cli.py benchmark` shares durable checkpointing and bounded per-request retries/timeouts but has no aggregate logical-call, HTTP-attempt, token-budget, or absolute-deadline flags and does not enforce these helper-specific budgets.
