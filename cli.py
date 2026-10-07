@@ -2,8 +2,11 @@
 
 Separate from main.py's interactive menu (which keeps driving the existing
 fetch/sample/extract/judge/whole-process flows unchanged). Subcommands:
-`audit` (Phase 1), `benchmark`/`evaluate` (Phase 4); `export-review` lands
-in a later phase.
+`audit` (Phase 1), `benchmark`/`evaluate` (Phase 4),
+`historical-baseline`/`post-fix-baseline` (saved baselines) and
+`general-approval-review` (offline review pack for the open general-approval
+question; no inference, never loads .env); `export-review` lands in a later
+phase.
 """
 from __future__ import annotations
 
@@ -23,6 +26,9 @@ from benchmark import run_benchmark, prepare_benchmark
 from benchmark_checkpoint import BenchmarkCheckpoint, BudgetExhausted
 from dataset_builder import build_dataset, write_dataset
 from fold_builder import load_folds
+from general_approval_review import (
+    DEFAULT_ANNOTATIONS_DB, DEFAULT_RUNS, DEFAULT_SOURCES, RunSpec, run_general_approval_review,
+)
 from historical_baseline import build_historical_predictions, build_post_fix_baseline_predictions
 from revisable_attribution import REVISABLE_VARIANTS, validate_revisable_variant
 
@@ -352,6 +358,61 @@ def _run_post_fix_baseline(args: argparse.Namespace) -> None:
         _print_metrics("Overall", evaluator_v2.evaluate(predictions, reference))
 
 
+def _run_general_approval_review(args: argparse.Namespace) -> None:
+    """Build the offline general-approval review pack; never loads .env, no inference.
+
+    Writes the artifacts via general_approval_review.run_general_approval_review
+    and prints the scored general-approval counts per total, run and fold,
+    the annotator-note counts, the pack size and the written paths.
+
+    Args:
+        args: Parsed `general-approval-review` arguments: run (list of
+            [NAME, PREDICTIONS, EXPECTED] or None for DEFAULT_RUNS), reference,
+            folds, annotations, source (list or None for DEFAULT_SOURCES),
+            role, tiers ("A", "A+B" or "B") and output_dir (or None).
+
+    Raises:
+        FileNotFoundError: If an input file or the output directory's parent
+            is missing.
+        FileExistsError: If the output directory already exists.
+        RuntimeError: If an input file changed during the run.
+        ValueError: If the inputs are inconsistent.
+    """
+    runs = [RunSpec(name, Path(pred), Path(exp)) for name, pred, exp in args.run] if args.run else DEFAULT_RUNS
+    result = run_general_approval_review(
+        runs=runs,
+        reference_path=Path(args.reference),
+        folds_path=Path(args.folds),
+        annotations_path=Path(args.annotations),
+        source_paths=[Path(p) for p in args.source] if args.source else DEFAULT_SOURCES,
+        role=args.role,
+        # "A+B" -> ["A", "B"]
+        tiers=args.tiers.split("+"),
+        output_dir=Path(args.output_dir) if args.output_dir else None,
+    )
+    summary = result.summary
+    scored = summary["scored_general_approval"]
+    table = Table(title="Accepted general_approval pairs with a resolved reference")
+    for column in ("group", "pairs", "correct", "neutral", "in_favor", "against", "comments"):
+        table.add_column(column, justify="left" if column == "group" else "right")
+    groups = [("total", scored["total"])]
+    groups += [(f"run {name}", block) for name, block in scored["by_run"].items()]
+    groups += [(f"fold {fold}", block) for fold, block in scored["by_fold"].items()]
+    for name, block in groups:
+        labels = block["reference_labels"]
+        table.add_row(name, str(block["pairs"]), str(block["correct"]), str(labels.get("neutral", 0)),
+                      str(labels.get("in_favor", 0)), str(labels.get("against", 0)), str(block["comments"]))
+    console.print(table)
+    notes, pack = summary["annotator_notes"], summary["pack"]
+    console.print(f"Annotator general-approval notes: {notes['general_approval_broad']['pairs']} pairs (broad), "
+                  f"{notes['general_approval_strict']['pairs']} (strict)")
+    console.print(f"Review pack: {pack['comments']} comments ({pack['comments_outside_runs']} outside runs), "
+                  f"{pack['key_message_rows']} key-message rows")
+    console.print("[dim]Offline analysis only: no inference, no network, .env not loaded.[/dim]")
+    for path in result.files.values():
+        console.print(f"[green]Wrote {path}[/green]")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cli.py", description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -482,6 +543,32 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Path to a persisted fold assignment (default: {DEFAULT_FOLDS_PATH}).",
     )
     post_fix_parser.set_defaults(func=_run_post_fix_baseline)
+
+    review_parser = subparsers.add_parser(
+        "general-approval-review",
+        help="Offline review pack for the open general-approval question (diagnostic parquet, safe summary, "
+        "German xlsx). No inference, no network, never loads .env.",
+    )
+    review_parser.add_argument(
+        "--run", nargs=3, action="append", metavar=("NAME", "PREDICTIONS", "EXPECTED"),
+        help="A saved run (repeatable); defaults to the fold-0 option C prompt-2 run and the held-out folds 1-4 run.",
+    )
+    review_parser.add_argument("--reference", default=str(DEFAULT_REFERENCE_PATH),
+                               help=f"Reference dataset (default: {DEFAULT_REFERENCE_PATH}).")
+    review_parser.add_argument("--folds", default=str(DEFAULT_FOLDS_PATH),
+                               help=f"Persisted fold assignment (default: {DEFAULT_FOLDS_PATH}).")
+    review_parser.add_argument("--annotations", default=str(DEFAULT_ANNOTATIONS_DB),
+                               help=f"Annotation database, opened read-only (default: {DEFAULT_ANNOTATIONS_DB}).")
+    review_parser.add_argument("--source", action="append",
+                               help="Frozen extraction source parquet (repeatable); defaults to the two run sources.")
+    review_parser.add_argument("--role", choices=["primary", "secondary", "all"], default="primary")
+    review_parser.add_argument("--tiers", choices=["A", "A+B", "B"], default="A+B")
+    review_parser.add_argument(
+        "--output-dir", default=None,
+        help="New directory to create (default: dataset/experiments/general_approval_review_<created_utc>); "
+        "must not exist.",
+    )
+    review_parser.set_defaults(func=_run_general_approval_review)
 
     return parser
 
