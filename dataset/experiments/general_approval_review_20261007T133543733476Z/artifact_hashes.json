@@ -1,0 +1,9 @@
+{
+  "created_utc": "20261007T133543733476Z",
+  "complete": true,
+  "files": {
+    "diagnostic_pairs.parquet": "a5ed1c94e5233997bfe444ae1453c7639185ab13c87e50311c13ada52e5e5647",
+    "general_approval_review.safe_summary.json": "c255c1a9ae8bfe634243cdef43608e2af950eccf6216389965c08ec2e2ff9e9b",
+    "general_approval_review_pack_v1_20261007T133543733476Z.xlsx": "630882091e7b077c30dbd42a87fbe8ad8b9c990457fe84b98b253bae0fdaec25"
+  }
+}

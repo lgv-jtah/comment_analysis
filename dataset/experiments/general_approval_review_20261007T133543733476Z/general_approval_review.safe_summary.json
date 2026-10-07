@@ -1,0 +1,341 @@
+{
+  "created_utc": "20261007T133543733476Z",
+  "analysis_only": true,
+  "new_inference_requests": 0,
+  "network_calls": 0,
+  "versions": {
+    "diagnostic_schema": "ga_diagnostic_v1",
+    "pack_schema": "ga_review_pack_v1",
+    "signals": "ga_signals_v1"
+  },
+  "selection": {
+    "role": "primary",
+    "tiers": [
+      "A",
+      "B"
+    ]
+  },
+  "run_ids": {
+    "fold0_optionc_prompt2": "benchmark_97f0d7cf1b724aa7a8eaaa10948ab026",
+    "heldout_folds1-4": "benchmark_6ed48c6e112c4171a1e5a77f0fdddb24"
+  },
+  "module_sha256": "56865af2b2c112690c20d7e0d07c6266de5e61f2f5662f22a791c2f9ac02b690",
+  "input_sha256": {
+    "annotations": {
+      "path": "evaluation_data/evaluations_backup20260922.sq3",
+      "sha256": "3065b05c6ad143331e0966623686b52dc99418b6119bded3b1bd0c96c42b2091"
+    },
+    "folds": {
+      "path": "dataset/folds_v1.json",
+      "sha256": "99741e72789f41ce782a06d52d2beaeb2b921623f8102fe4cf6974309e6c9852"
+    },
+    "reference": {
+      "path": "dataset/pairs.parquet",
+      "sha256": "22a62d0b6846267210b4fbc9cf448f8e853e10083f789a45cd6f1af91874aa1b"
+    },
+    "run:fold0_optionc_prompt2:expected": {
+      "path": "dataset/experiments/fold0_gptoss-120b_optionc_prompt2_20261006_live.expected.parquet",
+      "sha256": "cacd8cc21590a2de654d9d08131b4133f97ec38ad0acc4aff284ec0ec9a44d71"
+    },
+    "run:fold0_optionc_prompt2:predictions": {
+      "path": "dataset/experiments/fold0_gptoss-120b_optionc_prompt2_20261006_live.parquet",
+      "sha256": "c63cc7250e67fcc6160a69b3a6babf9d4b11726d13a7ca96dbaf362a971c2a81"
+    },
+    "run:heldout_folds1-4:expected": {
+      "path": "dataset/experiments/heldout_folds1-4_gptoss-120b_20261006_live.expected.parquet",
+      "sha256": "4243deb7fe4eb78896d2068e96c34dd462d5f7cfb67b7d80e1e0e6a0cc897b3a"
+    },
+    "run:heldout_folds1-4:predictions": {
+      "path": "dataset/experiments/heldout_folds1-4_gptoss-120b_20261006_live.parquet",
+      "sha256": "493d8b0779baa635177334c2e80cd544ffdbe94b87302f20a80de5479ab8bfc0"
+    },
+    "source:0": {
+      "path": "dataset/experiments/screening_subset_fold0_source.parquet",
+      "sha256": "d0961f585d1dfecf61c7d3cdaf30cb5faf13bd5925a8f60993840f4cb233fe6f"
+    },
+    "source:1": {
+      "path": "dataset/experiments/heldout_folds1-4_source.parquet",
+      "sha256": "55ec0edb1922e09a1d49c5db4fc08f799b22160a6fdc9b724b2e9cfed46563dc"
+    }
+  },
+  "scored_general_approval": {
+    "definition": "status accepted, basis general_approval, resolved reference (selected role and tiers)",
+    "total": {
+      "pairs": 108,
+      "correct": 65,
+      "reference_labels": {
+        "against": 3,
+        "in_favor": 40,
+        "neutral": 65
+      },
+      "comments": 40,
+      "contributions": 35
+    },
+    "by_run": {
+      "fold0_optionc_prompt2": {
+        "pairs": 31,
+        "correct": 24,
+        "reference_labels": {
+          "against": 1,
+          "in_favor": 6,
+          "neutral": 24
+        },
+        "comments": 11,
+        "contributions": 9
+      },
+      "heldout_folds1-4": {
+        "pairs": 77,
+        "correct": 41,
+        "reference_labels": {
+          "against": 2,
+          "in_favor": 34,
+          "neutral": 41
+        },
+        "comments": 29,
+        "contributions": 26
+      }
+    },
+    "by_fold": {
+      "0": {
+        "pairs": 31,
+        "correct": 24,
+        "reference_labels": {
+          "against": 1,
+          "in_favor": 6,
+          "neutral": 24
+        },
+        "comments": 11,
+        "contributions": 9
+      },
+      "1": {
+        "pairs": 12,
+        "correct": 3,
+        "reference_labels": {
+          "in_favor": 9,
+          "neutral": 3
+        },
+        "comments": 5,
+        "contributions": 4
+      },
+      "2": {
+        "pairs": 26,
+        "correct": 17,
+        "reference_labels": {
+          "in_favor": 9,
+          "neutral": 17
+        },
+        "comments": 10,
+        "contributions": 9
+      },
+      "3": {
+        "pairs": 30,
+        "correct": 16,
+        "reference_labels": {
+          "against": 2,
+          "in_favor": 12,
+          "neutral": 16
+        },
+        "comments": 10,
+        "contributions": 9
+      },
+      "4": {
+        "pairs": 9,
+        "correct": 5,
+        "reference_labels": {
+          "in_favor": 4,
+          "neutral": 5
+        },
+        "comments": 4,
+        "contributions": 4
+      }
+    }
+  },
+  "accepted_general_approval_unresolved_reference": {
+    "pairs": 16,
+    "comments": 5
+  },
+  "general_approval_claim_without_evidence": {
+    "pairs": 15,
+    "comments": 5,
+    "by_status": {
+      "failed": 10,
+      "needs_review": 5
+    }
+  },
+  "annotator_notes": {
+    "primary_annotation_rows": 797,
+    "general_approval_broad": {
+      "pairs": 87,
+      "comments": 35,
+      "reference_labels": {
+        "in_favor": 18,
+        "neutral": 49,
+        "unresolved": 20
+      }
+    },
+    "general_approval_strict": {
+      "pairs": 84,
+      "comments": 33,
+      "reference_labels": {
+        "in_favor": 18,
+        "neutral": 49,
+        "unresolved": 17
+      }
+    },
+    "general_rejection": {
+      "pairs": 1,
+      "comments": 1
+    },
+    "not_neutral": {
+      "pairs": 5,
+      "comments": 2
+    },
+    "general_approval_broad_outside_runs": {
+      "pairs": 6,
+      "comments": 3,
+      "contributions": 3,
+      "contributions_in_a_fold": 0
+    },
+    "general_approval_broad_in_runs_by_model_basis_and_status": {
+      "explicit_target/accepted": 9,
+      "explicit_target/needs_review": 1,
+      "general_approval/accepted": 59,
+      "none/needs_review": 1,
+      "unaddressed/accepted": 2,
+      "unaddressed/needs_review": 9
+    }
+  },
+  "scored_general_approval_reference_provenance": {
+    "accepted_shown_label": {
+      "in_favor": 40,
+      "neutral": 39
+    },
+    "active_correction": {
+      "against": 3,
+      "neutral": 26
+    }
+  },
+  "scored_general_approval_signal_classes": {
+    "approval_plus_content": {
+      "comments": 12,
+      "pairs": 34,
+      "by_reference_label": {
+        "in_favor": {
+          "match": 0,
+          "mismatch": 20
+        },
+        "neutral": {
+          "match": 14,
+          "mismatch": 0
+        }
+      }
+    },
+    "back_reference": {
+      "comments": 2,
+      "pairs": 5,
+      "by_reference_label": {
+        "in_favor": {
+          "match": 0,
+          "mismatch": 3
+        },
+        "neutral": {
+          "match": 2,
+          "mismatch": 0
+        }
+      }
+    },
+    "blanket_no_content": {
+      "comments": 16,
+      "pairs": 39,
+      "by_reference_label": {
+        "in_favor": {
+          "match": 0,
+          "mismatch": 5
+        },
+        "neutral": {
+          "match": 34,
+          "mismatch": 0
+        }
+      }
+    },
+    "content_without_approval_phrase": {
+      "comments": 7,
+      "pairs": 15,
+      "by_reference_label": {
+        "in_favor": {
+          "match": 0,
+          "mismatch": 12
+        },
+        "neutral": {
+          "match": 3,
+          "mismatch": 0
+        }
+      }
+    },
+    "negation_or_irony_cue": {
+      "comments": 3,
+      "pairs": 15,
+      "by_reference_label": {
+        "against": {
+          "match": 0,
+          "mismatch": 3
+        },
+        "neutral": {
+          "match": 12,
+          "mismatch": 0
+        }
+      }
+    }
+  },
+  "heuristic_causes": {
+    "pack_pairs": {
+      "A_label_inconsistency_candidate": 5,
+      "B_model_error_candidate": 18,
+      "match": 76,
+      "model_other_basis": 3,
+      "not_scorable": 56,
+      "rule_dependent": 20
+    },
+    "scored_general_approval_pairs": {
+      "A_label_inconsistency_candidate": 5,
+      "B_model_error_candidate": 18,
+      "match": 65,
+      "rule_dependent": 20
+    }
+  },
+  "scored_general_approval_comments_with_disagreeing_reference_labels": 8,
+  "pack": {
+    "comments": 57,
+    "key_message_rows": 178,
+    "comments_in_runs": 54,
+    "comments_outside_runs": 3,
+    "comments_by_population_flag": {
+      "pop_model_ga": 41,
+      "pop_model_ga_claim_without_evidence": 5,
+      "pop_annotator_note": 35,
+      "pop_outside_runs": 3
+    },
+    "illegal_characters_in_diagnostic_texts": 0
+  },
+  "secondary_annotations": {
+    "rows_total": 7,
+    "rows_on_pack_comments": 6
+  },
+  "consistency_checks": {
+    "general_approval_vs_evaluator_v2": {
+      "fold0_optionc_prompt2": {
+        "general_approval_pairs": 31,
+        "general_approval_correct": 24,
+        "matches_evaluator_v2": true
+      },
+      "heldout_folds1-4": {
+        "general_approval_pairs": 77,
+        "general_approval_correct": 41,
+        "matches_evaluator_v2": true
+      }
+    }
+  },
+  "diagnostic_content_sha256": "e8f70b6965a0f28a83ab1008a55ae18810119206a239cc25aa4c9664e3eff8dd",
+  "heuristics_note": "Signals and heuristic causes were derived after inspecting this cohort; they are descriptive triage, not validated.",
+  "heldout_note": "Folds 1-4 are held-out evaluation data. Any rule or prompt change tuned on these numbers turns them into development data; reference labels are never overwritten here."
+}
