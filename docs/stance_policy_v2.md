@@ -177,7 +177,8 @@ held-out results. Two live fold-0 runs then measured 69 and, after a
 prompt revision, 74 of 119 correct automatic answers (forced choice 87
 and 90); see the "Option C Fold-0 Runs" section of
 [Revisable Attribution Experiment](revisable_attribution_experiment.md).
-Reportable figures require the held-out folds 1-4.
+The single held-out run on folds 1-4 reached 326 of 588 correct automatic answers, accepted accuracy 0.715, and forced choice 418.
+Its 77 accepted `general_approval` pairs scored 41 correct, and 34 of their references are `in_favor`; see [Held-Out Run On Folds 1-4](revisable_attribution_experiment.md#held-out-run-on-folds-1-4-2026-10-06).
 
 General rejection ("Bitte nicht.", noted by the annotator as "allgemeine
 ablehnende Reaktion") is unchanged by this decision: rule 7 still applies,
@@ -185,10 +186,10 @@ and a symmetric contribution-level marker is a separate, later step.
 
 ## Reporting: general-approval accuracy against historical labels
 
-*Historical context: this section was written under the superseded rule
-(general approval = `in_favor`). With general approval now `neutral`, the
-divergence it describes largely disappears, but the reporting rule -- always
-show the basis breakdown next to the blended number -- still applies.*
+*Historical context: this section was written under the superseded rule (general approval = `in_favor`).
+With general approval now `neutral`, the divergence it describes largely disappears on fold 0 (24 of 31 accepted `general_approval` pairs correct).
+On folds 1-4 it persists in the opposite direction: 34 of the 77 accepted `general_approval` references are `in_favor`, and only 41 are correct.
+The reporting rule, always showing the basis breakdown next to the blended number, therefore still applies.*
 
 Brief section 3: "Existing annotations do not fully match the new
 general-approval policy. Report results against historical labels

@@ -4,9 +4,10 @@
 
 `--mode revisable_attribution` opts into an experimental architecture implementing the same [stance policy v2](stance_policy_v2.md), not a new labeling policy.
 The initial validation handoff reported 679 passing tests from `uv run pytest --cov` plus eight independent probes; this was software validation, not an inference or accuracy result.
-No broad experiment run has been completed; the [checkpointed model comparison](#checkpointed-model-comparison) is a 40-comment fold-0 development run; the later [matched fold-0 screening summary](../dataset/experiments/screening_fold0_mistral-nemo_matched_20260928T102005Z.summary.json) records verified routing and schema-valid responses for that historical run, not a current readiness guarantee.
+The single held-out run is recorded in [Held-Out Run On Folds 1-4](#held-out-run-on-folds-1-4-2026-10-06); the [checkpointed model comparison](#checkpointed-model-comparison) is a 40-comment fold-0 development run; the later [matched fold-0 screening summary](../dataset/experiments/screening_fold0_mistral-nemo_matched_20260928T102005Z.summary.json) records verified routing and schema-valid responses for that historical run, not a current readiness guarantee.
 Pre-variant report numbers remain historical results under their original code, prompts, cohorts, and scoring contracts, not measurements of the A/B variants described below.
 Fold 0 has been used for development and tuning and is not an untouched holdout, even where CLI output calls its grouping "out-of-fold".
+Folds 1-4 were untouched until that held-out run on 2026-10-06; any tuning on them from now on makes them development data too.
 Do not rewrite old results or claim an independently validated accuracy improvement from policy fixtures or these tests.
 
 ## Engine Contract
@@ -206,6 +207,7 @@ Fold scoring aligns the expected cohort first, then partitions by expected contr
 Overlapping test contributions are rejected, and any eligible expected pair without a fold assignment raises an error rather than disappearing from pooled accuracy.
 Unassigned non-eligible pairs remain in overall operational metrics and `unassigned_expected_pairs`, but not in the pooled fold subset.
 Evaluation prints per-fold, pooled, and overall metrics; JSON contains overall `metrics`, `pooled_out_of_fold`, and `unassigned_expected_pairs`, but not per-fold metric objects.
+Only the overall `metrics` carry the cohort-level `unmatched_prediction_pairs` and `unexpected_prediction_pairs` counters; per-fold and `pooled_out_of_fold` objects always report 0 for them.
 JSON also exposes macro-F1, per-class precision/recall/F1, and duplicate/quarantine diagnostics beyond the compact console tables.
 The Python `bootstrap_ci` API resamples expected contributions with replacement, preserving missing pairs and repeated draw weights; the CLI does not generate confidence intervals automatically.
 
@@ -215,7 +217,9 @@ The Python `bootstrap_ci` API resamples expected contributions with replacement,
 2. Freeze the selected engine and its prompts, then compare IONOS models with the same inputs and scoring contract to isolate model effects.
 
 Use new basenames for every configuration and repeat, and retain manifests, execution records, predictions, coverage/failure diagnostics, and historical-label basis breakdowns together.
-Development screening is not holdout evidence; future evaluation must distinguish untouched test data from fold-0 tuning and report uncertainty without claiming a completed broad run.
+Development screening is not holdout evidence.
+Any evaluation must keep untouched test data separate from data used for tuning, which now includes fold 0 and folds 1-4, and must report uncertainty.
+The [held-out run on folds 1-4](#held-out-run-on-folds-1-4-2026-10-06) is the single completed held-out run.
 
 ## Implementation Map
 
@@ -473,10 +477,109 @@ Remaining accepted errors are mostly implied support still read as `unaddressed`
 Between the two option C runs 17 pairs flipped to correct and 12 to wrong, almost all on borderline comments, so a single temperature-0.1 run moves by roughly five pairs on its own.
 Fold-0 tuning stops here: further prompt changes on these 40 comments would mostly fit that noise, and the engine is frozen for a single held-out run on folds 1-4.
 
+### Held-Out Run On Folds 1-4 (2026-10-06)
+
+The frozen engine then ran once on the test contributions of folds 1-4 in `dataset/folds_v1.json`: 92 contributions, 208 comments, 655 expected pairs, and 588 eligible primary A+B pairs, with no fold-0 contribution.
+The source is the committed `dataset/experiments/heldout_folds1-4_source.parquet` (SHA-256 `55ec0edb…`), the same extraction file as the fold-0 source.
+Its manifest has the same prompt-file hashes, prompt configuration, stages, decoding, engine, and variant as `fold0_gptoss-120b_optionc_prompt2_20261006_live`; implementation hashes differ only for `benchmark.py`, `benchmark_checkpoint.py`, and `cli.py`, which gained the [run budgets](#run-budgets) in between.
+Run `benchmark_6ed48c6e112c4171a1e5a77f0fdddb24` used `gptoss-120b` through the verified IONOS `de-txl` route, temperature `0.1`, `max_tokens=20000`, JSON-schema responses, concurrency one, and backend-default reasoning.
+
+| Budget | Limit | Used |
+| --- | --- | --- |
+| Wall clock | 10,800 s | about 86 minutes (14:36 to 16:02 CEST) |
+| Total tokens | 2,000,000 | 1,419,716, no responses with unknown usage |
+| HTTP attempts | 600 | 413: two stages for 205 comments plus three stage-1-only comments, no retries |
+
+The run published all 208 comments and 655 pairs with no stop reason.
+
+| Run (primary A+B, 588 eligible) | Correct automatic | Accepted accuracy | Labelled coverage | Forced-choice correct | Eligible in review | Eligible failed | Macro-F1 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| [GPT-OSS-120B held-out](../dataset/experiments/heldout_folds1-4_gptoss-120b_20261006_live.primary_AB.metrics.json) | 326 (55.4%) | 0.715 (456 accepted) | 0.776 | 418 (71.1%) | 122 | 10 | 0.675 |
+| [Legacy pre-fix](../dataset/experiments/historical_baseline_predictions.heldout_folds1-4.primary_AB.metrics.json) | 425 (72.3%) | 0.723 (588 accepted) | 1.000 | 425 (72.3%) | 0 | 0 | 0.661 |
+| [Legacy post-fix](../dataset/experiments/post_fix_baseline_predictions.heldout_folds1-4.primary_AB.metrics.json) | 415 (70.6%) | 0.706 (588 accepted) | 1.000 | 415 (70.6%) | 0 | 0 | 0.640 |
+
+The majority-class baseline (`neutral`) is 0.563.
+Correct automatic answers per reference class are 27/48 `against`, 108/209 `in_favor`, and 191/331 `neutral` for GPT-OSS (43, 188, and 225 accepted), against 24, 189, and 212 for legacy pre-fix and 25, 189, and 201 for legacy post-fix.
+The proposed operating target of 80% accepted accuracy at 80% labelled coverage is not met: GPT-OSS reaches 0.715 at 0.776.
+
+| Measure | Fold 0 (prompt2 run, 119 eligible) | Folds 1-4 (588 eligible) |
+| --- | --- | --- |
+| GPT-OSS correct automatic | 74 (62.2%) | 326 (55.4%) |
+| GPT-OSS accepted accuracy | 0.733 (101 accepted) | 0.715 (456 accepted) |
+| GPT-OSS forced-choice correct | 90 (75.6%) | 418 (71.1%) |
+| GPT-OSS eligible pairs in review | 18 (15.1%) | 122 (20.7%) |
+| GPT-OSS eligible pairs failed | 0 | 10 |
+| Legacy pre-fix correct | 89 (74.8%) | 425 (72.3%) |
+| Legacy post-fix correct | 87 (73.1%) | 415 (70.6%) |
+
+| Fold | Eligible | GPT-OSS correct automatic | Legacy pre-fix | Legacy post-fix |
+| --- | --- | --- | --- | --- |
+| 1 | 112 | 63 (56.3%) | 73 (65.2%) | 73 (65.2%) |
+| 2 | 173 | 108 (62.4%) | 122 (70.5%) | 120 (69.4%) |
+| 3 | 138 | 68 (49.3%) | 106 (76.8%) | 101 (73.2%) |
+| 4 | 165 | 87 (52.7%) | 124 (75.2%) | 121 (73.3%) |
+
+The 99-pair gap to legacy pre-fix (89 to post-fix) splits by GPT-OSS outcome on the eligible pairs:
+
+| GPT-OSS outcome | Eligible pairs | GPT-OSS correct automatic | Legacy pre-fix correct | Legacy post-fix correct |
+| --- | --- | --- | --- | --- |
+| Accepted | 456 | 326 | 314 | 309 |
+| Review | 122 | 0 | 104 | 100 |
+| Failed | 10 | 0 | 7 | 6 |
+| Total | 588 | 326 | 425 | 415 |
+
+GPT-OSS is ahead on the pairs it accepts, and the gap comes from routing to review and from failures.
+Its withheld review proposals match the reference on 92 of the 122 eligible review pairs, and 15 have no proposal.
+The 129 review pairs (122 eligible) come from 42 comments; `unresolved_scope` appears on 100 eligible review pairs and `scope_uncertainty_flag:0` on 71, with overlap.
+On forced choice against legacy pre-fix, both are right on 301 pairs, only GPT-OSS on 117, only legacy on 124, and neither on 46 (298, 120, 117, and 53 against post-fix).
+
+| Basis of GPT-OSS accepted pairs | Accepted | GPT-OSS correct | Legacy pre-fix correct | Legacy post-fix correct |
+| --- | --- | --- | --- | --- |
+| `explicit_target` | 179 | 135 | 136 | 136 |
+| `unaddressed` | 189 | 145 | 111 | 107 |
+| `general_approval` | 77 | 41 | 59 | 58 |
+| `no_position` | 9 | 5 | 6 | 6 |
+| `explicit_exclusion` | 2 | 0 | 2 | 2 |
+
+All 77 `general_approval` pairs are `neutral`, and their references are 41 `neutral`, 34 `in_favor`, and 2 `against`, compared with 24 of 31 correct on fold 0.
+On these folds the annotator's `neutral` convention for blanket approval holds for only about half of the pairs.
+
+The 10 failed pairs come from three comments whose stage 1 claimed general support without comment evidence (`stage1_general_support_missing_evidence`), so stage 2 was not called.
+They are contribution 24370 (five pairs, a substantive argument about the extra transfer at Diebsteich), 6575 (one pair, "Ich freu mich mit Ihnen."), and 23790 (four pairs, "Ich schließe mich den obigen Kommentaren an! …"); six are in fold 3 and four in fold 4.
+
+Five expected pairs have no reference row: all five comments on contribution 2870 for the key message "Akzeptanz von Parkgebühren durch Autofahrer".
+They count in `total_pairs` and operational metrics but are never eligible, so GPT-OSS reports them as `unmatched_prediction_pairs` and the legacy files, which have no rows for them, as five missing (failed) pairs.
+The legacy files otherwise cover all 650 reference pairs of these folds; they also report 147 `unexpected_prediction_pairs` outside this cohort and 7 `identical_prediction_duplicates`, because the committed parquets predate the duplicate collapse in `historical_baseline.py`.
+Both the GPT-OSS and the legacy scores exclude 2 quarantined pairs.
+
+Caveats:
+
+- The legacy rows are verified-by-construction, not an independent baseline (see [Results Against Historical Labels](#results-against-historical-labels)); 60 pairs of this cohort where legacy was judged wrong without a usable correction are unresolved and excluded.
+- This is a single temperature-0.1 run without a confidence interval; between the two fold-0 runs 17 pairs flipped to correct and 12 to wrong, and the per-fold correct-automatic rate here ranges from 49.3% to 62.4%.
+- Folds 1-4 are now consumed: any prompt or policy tuning based on these results turns them into development data.
+- The blended scores are the historical-label view required by the [reporting rule](stance_policy_v2.md#reporting-general-approval-accuracy-against-historical-labels); the basis table above is reported alongside them, not as a replacement.
+
+The legacy metrics come from `cli.py evaluate` on the committed legacy parquets, scored against the run's own expected cohort:
+
+```bash
+for baseline in historical_baseline_predictions post_fix_baseline_predictions; do
+  uv run cli.py evaluate \
+    --predictions "dataset/experiments/${baseline}.parquet" \
+    --reference dataset/pairs.parquet --folds dataset/folds_v1.json \
+    --expected-cohort dataset/experiments/heldout_folds1-4_gptoss-120b_20261006_live.expected.parquet \
+    --role primary --tiers A+B \
+    --output "dataset/experiments/${baseline}.heldout_folds1-4.primary_AB.metrics.json"
+done
+```
+
+Because `--output` refuses to overwrite, omit it to reproduce the committed numbers on the console.
+
 ### Artifacts And Reuse
 
 Committed: the GPT-OSS predictions and expected cohort, the Qwen partial predictions and expected cohort, the Nemo screening predictions and expected cohort, and the saved analysis directory.
 The checkpoints, manifests, locks, and telemetry of both runs remain local, untracked files under `dataset/experiments/`.
+For the option C fold-0 runs and the held-out run, the predictions, expected cohorts, and primary A+B metrics are committed; their checkpoints, manifests, locks, and dry-run files remain local and untracked.
+The legacy held-out metrics come from `cli.py evaluate` on the committed legacy parquets, which were not regenerated.
 The earlier interrupted GPT-OSS attempt `model_comparison_checkpointed_20260929T062257210845Z_gptoss-120b_full` (four comments, nine pairs) is preserved unchanged and was not merged into the published run.
 The previously passed Qwen smoke from `20260929T062257210845Z` was reused through read-only hash, route, and same-wire-contract checks, not repeated.
 
