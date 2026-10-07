@@ -184,6 +184,67 @@ General rejection ("Bitte nicht.", noted by the annotator as "allgemeine
 ablehnende Reaktion") is unchanged by this decision: rule 7 still applies,
 and a symmetric contribution-level marker is a separate, later step.
 
+### Open question 2026-10-07: blanket approval versus approval with own content
+
+Option C makes every `general_approval` pair `neutral`, but one question stays open: does approval that comes with own content ("Gute Idee, so reduzieren wir das Baumsterben.") count as support?
+Three rules are possible: rule 1, always `neutral`; rule 2, always `in_favor`; rule 3, `neutral` unless the approval comes with own content, then `in_favor`, either for all key messages or only for those the content addresses.
+Under every rule, a key message the comment actually discusses is judged on its own.
+Whether a disagreement between a `general_approval` prediction and the reference is an inconsistent label (A) or a model error (B) therefore depends on the rule, so each case is A, B, or rule-dependent.
+
+**Population.**
+The review covers every comment that the model labelled `general_approval` on any key message, that the model claimed general support for without evidence (review reason `general_support_missing_evidence` or `stage1_general_support_missing_evidence`), or that the annotator noted as a general approving reaction.
+That is 57 comments with 178 key-message pairs: 54 comments from the fold-0 option C prompt-2 run and the held-out folds 1-4 run, and 3 comments on contributions that no run covers.
+
+**Note matcher.**
+The matcher used here requires "zustimm" and "generell" or "allgemein" anywhere in the note, in either order, and finds 87 primary pairs: 49 `neutral`, 18 `in_favor` and 20 unresolved.
+The stricter matcher behind the "84 pairs" sentence above ("generell" or "allgemein" directly followed by "zustimmend") still finds 84 (49, 18 and 17 unresolved); that sentence is left as the record of that count.
+The 3 extra pairs use the reverse word order ("zustimmende generelle Reaktion") on "Danke, ja!" and on "Guter Vorschlag" (noted as "eher sarkastisch").
+Both notes that say "nicht neutral" ("Danke, ja!" and "Super Idee", 5 pairs) are on contributions that are unresolved and in no fold, so none of the scored numbers below contains them.
+
+**Reference provenance.**
+On the 108 accepted `general_approval` pairs with a resolved reference (40 comments, 35 contributions), the references are 65 `neutral`, 40 `in_favor` and 3 `against`, and 65 predictions are correct: 24 of 31 on fold 0 and 41 of 77 on folds 1-4.
+All 40 `in_favor` references are accepted shown labels: the annotation tool showed the legacy `in_favor` and she marked it correct.
+Of the 65 `neutral` references, 26 are active corrections of a legacy `in_favor`.
+The `in_favor` labels may therefore partly reflect acceptance of what the tool showed rather than an independent judgement, which is why the annotator is asked instead of reading a rule off the labels.
+In 8 of the 40 comments the reference labels differ between key messages of the same comment.
+A further 16 accepted `general_approval` pairs (5 comments) have no resolved reference, and the model claimed general support without evidence on 15 pairs (5 comments; 10 failed, 5 routed to review).
+
+**Descriptive signals.**
+The table splits the 108 pairs by a surface heuristic on the comment text (approval formula stripped, words left over, negation, irony and back-reference cues).
+The patterns were derived after inspecting this cohort, so the split is descriptive and not a validated classifier.
+Every prediction here is `neutral`, so a `neutral` reference is a match and any other reference a mismatch.
+
+| Signal class | Comments | Pairs | `neutral` | `in_favor` | `against` |
+|---|---:|---:|---:|---:|---:|
+| Approval formula, at most 2 further words | 16 | 39 | 34 | 5 | 0 |
+| Approval formula with further content | 12 | 34 | 14 | 20 | 0 |
+| Content without an approval formula | 7 | 15 | 3 | 12 | 0 |
+| Negation or irony cue | 3 | 15 | 12 | 0 | 3 |
+| Back reference ("Siehe oben", "obigen Kommentaren") | 2 | 5 | 2 | 3 | 0 |
+
+Blanket approvals are labelled `neutral` 34 times out of 39, so the 5 `in_favor` pairs are candidates for an inconsistent label (A).
+Approval with own content splits 14 `neutral` to 20 `in_favor`; these 20 are the rule-dependent cases.
+The 18 mismatches without an approval formula, with a negation or irony cue, or with a back reference are candidates for a model error (B).
+
+**Review pack.**
+`uv run cli.py general-approval-review` builds everything offline from saved files, with no inference, no network and without loading `.env`; the annotation database is opened read-only and every input is hashed in the summary.
+It writes a new directory and never overwrites one; `artifact_hashes.json` is written last as the completion marker.
+The current run wrote [the diagnostic table](../dataset/experiments/general_approval_review_20261007T133543733476Z/diagnostic_pairs.parquet), [the safe summary](../dataset/experiments/general_approval_review_20261007T133543733476Z/general_approval_review.safe_summary.json) (IDs and counts only), [the German review pack](../dataset/experiments/general_approval_review_20261007T133543733476Z/general_approval_review_pack_v1_20261007T133543733476Z.xlsx) and [the artifact hashes](../dataset/experiments/general_approval_review_20261007T133543733476Z/artifact_hashes.json).
+The pack's sheet "Anleitung" defines the three rules and shows what each rule, including both rule-3 scopes, produces for the same two invented comments (one blanket approval, one with own content), so no real comment is tied to a rule.
+It also holds the two overall answers (preferred rule and reasoning).
+Sheet "Kommentare" has one row per comment with a six-option classification, the rule that fits, the scope under rule 3 and a free note.
+Her earlier notes, the model's output and her earlier labels sit in a collapsed "Hintergrund" column group, and the instructions ask her to judge the text first.
+The heuristic cause sits only in a collapsed "Projektteam" group at the far right; a narrow visible column after each group carries its plus button and keeps the two groups apart.
+Sheet "Kernbotschaften" asks per key message only whether the comment addresses it in content (ja, nein, unklar).
+Sheet "Übersicht" holds static numbers copied from the summary; the hidden sheets "Listen" and "Meta" carry the dropdown values, schema versions and expected IDs.
+The two answer sheets are not protected, because Excel blocks expanding column groups on protected sheets; the reader detects edited texts and IDs through row fingerprints instead, and only the text sheets "Anleitung" and "Übersicht" are protected without a password.
+`general_approval_review.read_review_pack` parses and validates a returned pack (schema version, IDs, row fingerprints, option values) without saving it; deriving A or B per case from her answers is a later step.
+
+**Constraints.**
+Folds 1-4 are held-out data and must not be used for tuning: any rule or prompt change tuned on these numbers turns them into development data.
+Reference labels are never overwritten; any re-labelling that follows from her answers goes into a new, versioned file.
+The policy decision waits for the annotator's answers; until then option C stands as decided.
+
 ## Reporting: general-approval accuracy against historical labels
 
 *Historical context: this section was written under the superseded rule (general approval = `in_favor`).
