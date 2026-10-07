@@ -1,0 +1,144 @@
+{
+  "majority_class_baseline": {
+    "label": "neutral",
+    "accuracy": 0.5629251700680272
+  },
+  "metrics": {
+    "total_pairs": 655,
+    "eligible_pairs": 588,
+    "forced_choice_correct": 425,
+    "forced_choice_accuracy": 0.7227891156462585,
+    "accepted_pairs": 588,
+    "accepted_correct": 425,
+    "accepted_accuracy": 0.7227891156462585,
+    "labelled_coverage": 1.0,
+    "operational_coverage": 0.9923664122137404,
+    "review_pairs": 0,
+    "review_rate": 0.0,
+    "failed_pairs": 5,
+    "failure_rate": 0.007633587786259542,
+    "per_class": {
+      "against": {
+        "label": "against",
+        "eligible": 48,
+        "accepted": 48,
+        "accepted_correct": 24,
+        "accepted_accuracy": 0.5,
+        "coverage": 1.0,
+        "insufficient_sample": false,
+        "precision": 0.4897959183673469,
+        "recall": 0.5,
+        "f1": 0.4948453608247423,
+        "review_rate": 0.0
+      },
+      "in_favor": {
+        "label": "in_favor",
+        "eligible": 209,
+        "accepted": 209,
+        "accepted_correct": 189,
+        "accepted_accuracy": 0.9043062200956937,
+        "coverage": 1.0,
+        "insufficient_sample": false,
+        "precision": 0.6385135135135135,
+        "recall": 0.9043062200956937,
+        "f1": 0.7485148514851484,
+        "review_rate": 0.0
+      },
+      "neutral": {
+        "label": "neutral",
+        "eligible": 331,
+        "accepted": 331,
+        "accepted_correct": 212,
+        "accepted_accuracy": 0.6404833836858006,
+        "coverage": 1.0,
+        "insufficient_sample": false,
+        "precision": 0.8724279835390947,
+        "recall": 0.6404833836858006,
+        "f1": 0.7386759581881532,
+        "review_rate": 0.0
+      }
+    },
+    "insufficient_sample": false,
+    "insufficient_sample_reason": null,
+    "unmatched_prediction_pairs": 0,
+    "unexpected_prediction_pairs": 147,
+    "missing_prediction_pairs": 5,
+    "conflicting_prediction_pairs": 0,
+    "identical_prediction_duplicates": 7,
+    "quarantined_reference_pairs": 2,
+    "macro_f1": 0.660678723499348
+  },
+  "accepted_accuracy_by_basis": {
+    "historical": {
+      "n": 588,
+      "correct": 425,
+      "accuracy": 0.7227891156462585
+    }
+  },
+  "pooled_out_of_fold": {
+    "total_pairs": 655,
+    "eligible_pairs": 588,
+    "forced_choice_correct": 425,
+    "forced_choice_accuracy": 0.7227891156462585,
+    "accepted_pairs": 588,
+    "accepted_correct": 425,
+    "accepted_accuracy": 0.7227891156462585,
+    "labelled_coverage": 1.0,
+    "operational_coverage": 0.9923664122137404,
+    "review_pairs": 0,
+    "review_rate": 0.0,
+    "failed_pairs": 5,
+    "failure_rate": 0.007633587786259542,
+    "per_class": {
+      "against": {
+        "label": "against",
+        "eligible": 48,
+        "accepted": 48,
+        "accepted_correct": 24,
+        "accepted_accuracy": 0.5,
+        "coverage": 1.0,
+        "insufficient_sample": false,
+        "precision": 0.4897959183673469,
+        "recall": 0.5,
+        "f1": 0.4948453608247423,
+        "review_rate": 0.0
+      },
+      "in_favor": {
+        "label": "in_favor",
+        "eligible": 209,
+        "accepted": 209,
+        "accepted_correct": 189,
+        "accepted_accuracy": 0.9043062200956937,
+        "coverage": 1.0,
+        "insufficient_sample": false,
+        "precision": 0.6385135135135135,
+        "recall": 0.9043062200956937,
+        "f1": 0.7485148514851484,
+        "review_rate": 0.0
+      },
+      "neutral": {
+        "label": "neutral",
+        "eligible": 331,
+        "accepted": 331,
+        "accepted_correct": 212,
+        "accepted_accuracy": 0.6404833836858006,
+        "coverage": 1.0,
+        "insufficient_sample": false,
+        "precision": 0.8724279835390947,
+        "recall": 0.6404833836858006,
+        "f1": 0.7386759581881532,
+        "review_rate": 0.0
+      }
+    },
+    "insufficient_sample": false,
+    "insufficient_sample_reason": null,
+    "unmatched_prediction_pairs": 0,
+    "unexpected_prediction_pairs": 0,
+    "missing_prediction_pairs": 5,
+    "conflicting_prediction_pairs": 0,
+    "identical_prediction_duplicates": 7,
+    "quarantined_reference_pairs": 2,
+    "macro_f1": 0.660678723499348
+  },
+  "unassigned_expected_pairs": 0
+}
