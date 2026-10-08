@@ -203,10 +203,13 @@ Both notes that say "nicht neutral" ("Danke, ja!" and "Super Idee", 5 pairs) are
 
 **Reference provenance.**
 On the 108 accepted `general_approval` pairs with a resolved reference (40 comments, 35 contributions), the references are 65 `neutral`, 40 `in_favor` and 3 `against`, and 65 predictions are correct: 24 of 31 on fold 0 and 41 of 77 on folds 1-4.
+The references are the annotator's judgements, including the accepted shown labels, but they do not follow one rule.
 All 40 `in_favor` references are accepted shown labels: the annotation tool showed the legacy `in_favor` and she marked it correct.
-Of the 65 `neutral` references, 26 are active corrections of a legacy `in_favor`.
-The `in_favor` labels may therefore partly reflect acceptance of what the tool showed rather than an independent judgement, which is why the annotator is asked instead of reading a rule off the labels.
-In 8 of the 40 comments the reference labels differ between key messages of the same comment.
+Of the 65 `neutral` references, 26 are active corrections of a legacy `in_favor`, so comparable comments were sometimes confirmed and sometimes corrected.
+In 8 of the 40 comments the reference labels differ between key messages of the same comment, and her notes point both ways: mostly "neutraler Stance", occasionally "nicht neutral" (the latter only outside the scored folds, see above).
+The main cause is that the tool offered no general-approval label and no rule existed for this case.
+Anchoring on the shown label may have contributed in borderline cases; that is a possible cause, not a finding.
+A rule read off these labels would carry the inconsistency into the rule, which is why the annotator is asked.
 A further 16 accepted `general_approval` pairs (5 comments) have no resolved reference, and the model claimed general support without evidence on 15 pairs (5 comments; 10 failed, 5 routed to review).
 
 **Descriptive signals.**
