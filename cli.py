@@ -6,6 +6,9 @@ fetch/sample/extract/judge/whole-process flows unchanged). Subcommands:
 `historical-baseline`/`post-fix-baseline` (saved baselines) and
 `reaction-split-pack`/`reaction-split-read` (offline annotation pack for the
 general-reaction split and its read-back; no inference, never loads .env);
+`vote-ratio-fetch`/`vote-ratio-analyse` (the pre-registered vote-ratio
+equivalence test — `vote-ratio-fetch` is the only networked step, and
+`vote-ratio-analyse` is fully offline and never loads .env);
 `export-review` lands in a later phase.
 """
 from __future__ import annotations
@@ -31,6 +34,15 @@ from reaction_split_review import (
     DEFAULT_EXTRA_SOURCE, DEFAULT_POPULATION_DIR, export_reaction_split_labels, run_reaction_split_pack,
 )
 from revisable_attribution import REVISABLE_VARIANTS, validate_revisable_variant
+from vote_ratio_hypothesis import (
+    DEFAULT_CONTRIBUTIONS_PATH as VR_DEFAULT_CONTRIBUTIONS_PATH,
+    DEFAULT_EVAL_DB as VR_DEFAULT_EVAL_DB,
+    DEFAULT_PAIRS_PATH as VR_DEFAULT_PAIRS_PATH,
+    N_BOOTSTRAP as VR_N_BOOTSTRAP,
+    BOOTSTRAP_SEED as VR_BOOTSTRAP_SEED,
+    run_vote_analysis,
+    run_vote_fetch,
+)
 
 console = Console()
 
@@ -422,6 +434,64 @@ def _run_reaction_split_read(args: argparse.Namespace) -> None:
         console.print(f"[green]Wrote {path}[/green]")
 
 
+def _run_vote_ratio_fetch(args: argparse.Namespace) -> None:
+    """Fetch the current DIPAS vote snapshot for the gold contributions.
+
+    Args:
+        args: Parsed `vote-ratio-fetch` arguments: pairs, contributions,
+            output_dir (or None) and timeout.
+    """
+    result = run_vote_fetch(
+        pairs_path=Path(args.pairs),
+        contributions_path=Path(args.contributions),
+        output_dir=Path(args.output_dir) if args.output_dir else None,
+        timeout=args.timeout,
+    )
+    summary = result.summary
+    console.print(f"Vote snapshot: fetched {summary['contributions_fetched']} of "
+                  f"{summary['requested_contributions']} gold contributions "
+                  f"in {summary['network_calls']} network call(s).")
+    console.print(f"Missing from API: {summary['contributions_missing_from_api']['count']}; "
+                  f"without project: {summary['contributions_without_project']['count']}; "
+                  f"project collisions: {summary['contributions_with_project_collision']['count']}")
+    console.print(f"[dim]{summary['note']}[/dim]")
+    for path in result.files.values():
+        console.print(f"[green]Wrote {path}[/green]")
+
+
+def _run_vote_ratio_analyse(args: argparse.Namespace) -> None:
+    """Run the offline vote-ratio equivalence analysis; never loads .env.
+
+    Args:
+        args: Parsed `vote-ratio-analyse` arguments: snapshot_dir, pairs,
+            contributions, eval_db, output_dir (or None), n_bootstrap and
+            seed.
+    """
+    result = run_vote_analysis(
+        snapshot_dir=Path(args.snapshot_dir),
+        pairs_path=Path(args.pairs),
+        contributions_path=Path(args.contributions),
+        eval_db_path=Path(args.eval_db),
+        output_dir=Path(args.output_dir) if args.output_dir else None,
+        n_bootstrap=args.n_bootstrap,
+        seed=args.seed,
+    )
+    summary = result.summary
+    primary = summary["primary"]
+    ci90 = primary["ci90"]
+    verdict = "EQUIVALENT" if ci90["equivalent"] else "NOT equivalent"
+    if primary["difference_pp"] is None or ci90["low"] is None:
+        detail = "(undefined)"
+    else:
+        detail = (f"(difference {primary['difference_pp']:.1f} pp, "
+                  f"CI [{ci90['low']:.1f}, {ci90['high']:.1f}] pp)")
+    console.print(f"Primary verdict (90% CI): [bold]{verdict}[/bold] {detail}")
+    console.print(f"[dim]{summary['interpretation_rules']}[/dim]")
+    console.print("[dim]Offline only: no inference, no network, .env not loaded.[/dim]")
+    for path in result.files.values():
+        console.print(f"[green]Wrote {path}[/green]")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cli.py", description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -588,6 +658,56 @@ def build_parser() -> argparse.ArgumentParser:
         "must not exist.",
     )
     read_parser.set_defaults(func=_run_reaction_split_read)
+
+    vote_fetch_parser = subparsers.add_parser(
+        "vote-ratio-fetch",
+        help="Fetch the current DIPAS vote snapshot for the gold contributions (the only networked step).",
+    )
+    vote_fetch_parser.add_argument(
+        "--pairs", default=str(VR_DEFAULT_PAIRS_PATH),
+        help=f"Pairs parquet with the gold contributions (default: {VR_DEFAULT_PAIRS_PATH}).",
+    )
+    vote_fetch_parser.add_argument(
+        "--contributions", default=str(VR_DEFAULT_CONTRIBUTIONS_PATH),
+        help=f"Contributions parquet with the project mapping (default: {VR_DEFAULT_CONTRIBUTIONS_PATH}).",
+    )
+    vote_fetch_parser.add_argument(
+        "--output-dir", default=None,
+        help="New directory to create (default: dataset/experiments/vote_ratio_votes_<created_utc>); "
+        "must not exist.",
+    )
+    vote_fetch_parser.add_argument("--timeout", type=int, default=30,
+                                   help="Per-request timeout in seconds (default: 30).")
+    vote_fetch_parser.set_defaults(func=_run_vote_ratio_fetch)
+
+    vote_analyse_parser = subparsers.add_parser(
+        "vote-ratio-analyse",
+        help="Run the offline vote-ratio TOST equivalence analysis. No inference, no network, never loads .env.",
+    )
+    vote_analyse_parser.add_argument("--snapshot-dir", required=True,
+                                     help="A completed vote-ratio-fetch directory (only read).")
+    vote_analyse_parser.add_argument(
+        "--pairs", default=str(VR_DEFAULT_PAIRS_PATH),
+        help=f"Pairs parquet with the gold labels (default: {VR_DEFAULT_PAIRS_PATH}).",
+    )
+    vote_analyse_parser.add_argument(
+        "--contributions", default=str(VR_DEFAULT_CONTRIBUTIONS_PATH),
+        help=f"Contributions parquet (recorded for provenance; default: {VR_DEFAULT_CONTRIBUTIONS_PATH}).",
+    )
+    vote_analyse_parser.add_argument(
+        "--eval-db", default=str(VR_DEFAULT_EVAL_DB),
+        help=f"Evaluation SQLite database for the generic-approval sensitivity (default: {VR_DEFAULT_EVAL_DB}).",
+    )
+    vote_analyse_parser.add_argument(
+        "--output-dir", default=None,
+        help="New directory to create (default: dataset/experiments/vote_ratio_analysis_<created_utc>); "
+        "must not exist.",
+    )
+    vote_analyse_parser.add_argument("--n-bootstrap", type=int, default=VR_N_BOOTSTRAP,
+                                     help=f"Number of bootstrap resamples (default: {VR_N_BOOTSTRAP}).")
+    vote_analyse_parser.add_argument("--seed", type=int, default=VR_BOOTSTRAP_SEED,
+                                     help=f"Bootstrap seed (default: {VR_BOOTSTRAP_SEED}).")
+    vote_analyse_parser.set_defaults(func=_run_vote_ratio_analyse)
 
     return parser
 
