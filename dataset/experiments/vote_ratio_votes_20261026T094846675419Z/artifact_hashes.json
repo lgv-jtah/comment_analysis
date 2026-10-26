@@ -1,0 +1,8 @@
+{
+  "created_utc": "20261026T094846675419Z",
+  "complete": true,
+  "files": {
+    "contribution_votes.parquet": "30bdf70336f11ec9f055a02a7d4ec04b129dd4a8d74028b0cc1d401f1fe5625c",
+    "vote_ratio_fetch.summary.json": "40213ff9de5387d78fbb46360f6e5666b21083969119047a4365795635dc645d"
+  }
+}

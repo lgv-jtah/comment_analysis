@@ -1,0 +1,195 @@
+{
+  "schema_version": "vote_ratio_analysis_v1",
+  "created_utc": "20261026T094931373229Z",
+  "module_sha256": "0786ba93e42614456eefbc5019e5481936c462ba4666de320e8d094d7b652233",
+  "inputs": {
+    "snapshot": {
+      "path": "dataset/experiments/vote_ratio_votes_20261026T094846675419Z/contribution_votes.parquet",
+      "sha256": "30bdf70336f11ec9f055a02a7d4ec04b129dd4a8d74028b0cc1d401f1fe5625c"
+    },
+    "pairs": {
+      "path": "dataset/pairs.parquet",
+      "sha256": "22a62d0b6846267210b4fbc9cf448f8e853e10083f789a45cd6f1af91874aa1b"
+    },
+    "contributions": {
+      "path": "data/contributions.parquet",
+      "sha256": "d0c145414e783a5136ec1b8f79893eb39d512f92fc71a4ea4ac528c39f90b237"
+    },
+    "eval_db": {
+      "path": "evaluation_data/evaluations_backup20260922.sq3",
+      "sha256": "3065b05c6ad143331e0966623686b52dc99418b6119bded3b1bd0c96c42b2091"
+    }
+  },
+  "bootstrap": {
+    "n": 10000,
+    "seed": 20261026,
+    "resamples_dropped_zero_denominator": 0
+  },
+  "margin_pp": 10.0,
+  "interpretation_rules": "Equivalence does not prove that stance detection is unnecessary; non-equivalence does not prove that it is necessary. This test answers only whether the overall favor share of comments matches the overall share of thumbs up among votes.",
+  "vote_side_rule": "The vote side is pooled over a fixed set = every contribution with >=1 comment in the primary_AB label set and present in the vote snapshot. This set does not depend on the stance outcome and is identical for the primary analysis and every sensitivity variant, so the stance labels can never select which votes are counted.",
+  "counts": {
+    "n_comments": 246,
+    "n_pairs": 707,
+    "n_contributions": 115,
+    "n_contributions_with_votes": 107,
+    "n_contributions_missing_votes": {
+      "count": 0,
+      "ids": []
+    },
+    "n_contributions_zero_votes": 8,
+    "total_votingPro": 780,
+    "total_votingContra": 97,
+    "mixed_comments": 11,
+    "neutral_comments": 74,
+    "generic_approval_pairs_strict": 67,
+    "generic_approval_pairs_broad": 67,
+    "generic_approval_comments_strict": 30,
+    "generic_approval_comments_broad": 30
+  },
+  "vote_snapshot": {
+    "created_utc": "20261026T094846675419Z",
+    "note": "Only the gold contributions that map to exactly one project are fetched."
+  },
+  "representativeness_limit": "The comment labels are frozen gold data, while the votes are a live, monotonically growing quantity read at the snapshot time below. The two sides are therefore measured at different times; treat the comparison as between a frozen comment-label set and a later vote snapshot.",
+  "primary": {
+    "favor": 130,
+    "against": 31,
+    "neutral": 74,
+    "mixed": 11,
+    "favor_share": 80.74534161490683,
+    "neutral_share": 30.08130081300813,
+    "vote_pro": 780,
+    "vote_contra": 97,
+    "vote_share": 88.93956670467503,
+    "difference_pp": -8.194225089768196,
+    "resamples_dropped_zero_denominator": 0,
+    "ci90": {
+      "low": -14.641541690283395,
+      "high": -1.0660589809010852,
+      "equivalent": false
+    },
+    "ci95": {
+      "low": -15.787513560861797,
+      "high": 0.47380712764915023,
+      "equivalent": false
+    }
+  },
+  "sensitivity": {
+    "pair_level": {
+      "favor": 246,
+      "against": 60,
+      "neutral": 401,
+      "mixed": 0,
+      "favor_share": 80.3921568627451,
+      "neutral_share": 56.71852899575672,
+      "vote_pro": 780,
+      "vote_contra": 97,
+      "vote_share": 88.93956670467503,
+      "difference_pp": -8.547409841929934,
+      "resamples_dropped_zero_denominator": 0,
+      "ci90": {
+        "low": -15.321151674993235,
+        "high": -0.9166648151090185,
+        "equivalent": false
+      },
+      "ci95": {
+        "low": -16.685030153168498,
+        "high": 0.5323988429009178,
+        "equivalent": false
+      }
+    },
+    "approval_as_neutral": {
+      "favor": 123,
+      "against": 31,
+      "neutral": 81,
+      "mixed": 11,
+      "favor_share": 79.87012987012987,
+      "neutral_share": 32.926829268292686,
+      "vote_pro": 780,
+      "vote_contra": 97,
+      "vote_share": 88.93956670467503,
+      "difference_pp": -9.069436834545158,
+      "resamples_dropped_zero_denominator": 0,
+      "ci90": {
+        "low": -15.403773898936395,
+        "high": -1.8914866194378983,
+        "equivalent": false
+      },
+      "ci95": {
+        "low": -16.65493139364555,
+        "high": -0.4661431263484588,
+        "equivalent": false
+      }
+    },
+    "approval_as_in_favor": {
+      "favor": 147,
+      "against": 31,
+      "neutral": 57,
+      "mixed": 11,
+      "favor_share": 82.58426966292134,
+      "neutral_share": 23.170731707317074,
+      "vote_pro": 780,
+      "vote_contra": 97,
+      "vote_share": 88.93956670467503,
+      "difference_pp": -6.355297041753687,
+      "resamples_dropped_zero_denominator": 0,
+      "ci90": {
+        "low": -12.39924172062285,
+        "high": 0.5906969373332495,
+        "equivalent": false
+      },
+      "ci95": {
+        "low": -13.58307993232662,
+        "high": 1.9739329327730168,
+        "equivalent": false
+      }
+    },
+    "per_contribution_unweighted": {
+      "favor": 130,
+      "against": 31,
+      "neutral": 74,
+      "mixed": 11,
+      "favor_share": 80.03361344537815,
+      "neutral_share": 30.08130081300813,
+      "vote_pro": 780,
+      "vote_contra": 97,
+      "vote_share": 89.07672685038395,
+      "difference_pp": -9.043113405005798,
+      "resamples_dropped_zero_denominator": 0,
+      "ci90": {
+        "low": -15.66239160862858,
+        "high": -2.5924410490230385,
+        "equivalent": false
+      },
+      "ci95": {
+        "low": -17.074217483539577,
+        "high": -1.4851245598319247,
+        "equivalent": false
+      }
+    },
+    "mixed_half": {
+      "favor": 130,
+      "against": 31,
+      "neutral": 74,
+      "mixed": 11,
+      "favor_share": 78.77906976744185,
+      "neutral_share": 30.08130081300813,
+      "vote_pro": 780,
+      "vote_contra": 97,
+      "vote_share": 88.93956670467503,
+      "difference_pp": -10.160496937233177,
+      "resamples_dropped_zero_denominator": 0,
+      "ci90": {
+        "low": -16.50012119891166,
+        "high": -2.9087060039418247,
+        "equivalent": false
+      },
+      "ci95": {
+        "low": -17.680681351660105,
+        "high": -1.5865298903046543,
+        "equivalent": false
+      }
+    }
+  }
+}

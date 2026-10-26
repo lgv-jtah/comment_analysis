@@ -1,0 +1,240 @@
+{
+  "schema_version": "vote_ratio_votes_v1",
+  "created_utc": "20261026T094846675419Z",
+  "network_calls": 41,
+  "api_template": "https://beteiligung.hamburg/drupal/dipas-pds/projects/{project_id}/contributions/",
+  "module_sha256": "0786ba93e42614456eefbc5019e5481936c462ba4666de320e8d094d7b652233",
+  "inputs": {
+    "pairs": {
+      "path": "dataset/pairs.parquet",
+      "sha256": "22a62d0b6846267210b4fbc9cf448f8e853e10083f789a45cd6f1af91874aa1b"
+    },
+    "contributions": {
+      "path": "data/contributions.parquet",
+      "sha256": "d0c145414e783a5136ec1b8f79893eb39d512f92fc71a4ea4ac528c39f90b237"
+    }
+  },
+  "requested_contributions": 115,
+  "contributions_fetched": 115,
+  "contributions_missing_from_api": {
+    "count": 0,
+    "ids": []
+  },
+  "contributions_without_project": {
+    "count": 0,
+    "ids": []
+  },
+  "contributions_with_project_collision": {
+    "count": 0,
+    "ids": []
+  },
+  "per_project": {
+    "heimfeld-eissendorf": {
+      "status": "ok",
+      "features_returned": 632,
+      "gold_matched": 5
+    },
+    "bezirksrouten-nord": {
+      "status": "ok",
+      "features_returned": 974,
+      "gold_matched": 3
+    },
+    "schulcluster-eimsbuettel": {
+      "status": "ok",
+      "features_returned": 397,
+      "gold_matched": 3
+    },
+    "radverkehr-wandsbek": {
+      "status": "ok",
+      "features_returned": 2065,
+      "gold_matched": 10
+    },
+    "klima-hamburg-nord": {
+      "status": "ok",
+      "features_returned": 793,
+      "gold_matched": 4
+    },
+    "fachrunde-innenstadt": {
+      "status": "ok",
+      "features_returned": 526,
+      "gold_matched": 1
+    },
+    "wasserstadt": {
+      "status": "ok",
+      "features_returned": 139,
+      "gold_matched": 1
+    },
+    "trockener-bach2023": {
+      "status": "ok",
+      "features_returned": 164,
+      "gold_matched": 1
+    },
+    "osterbek": {
+      "status": "ok",
+      "features_returned": 210,
+      "gold_matched": 3
+    },
+    "fussverkehr-jenfeld": {
+      "status": "ok",
+      "features_returned": 90,
+      "gold_matched": 1
+    },
+    "magistrale-iserbrook": {
+      "status": "ok",
+      "features_returned": 186,
+      "gold_matched": 4
+    },
+    "rainvilleterrasse": {
+      "status": "ok",
+      "features_returned": 71,
+      "gold_matched": 1
+    },
+    "fahrradparken-harburg": {
+      "status": "ok",
+      "features_returned": 315,
+      "gold_matched": 1
+    },
+    "fahrradparken-altona": {
+      "status": "ok",
+      "features_returned": 977,
+      "gold_matched": 4
+    },
+    "fusswege-lohbruegge": {
+      "status": "ok",
+      "features_returned": 123,
+      "gold_matched": 1
+    },
+    "radverkehr-mitte": {
+      "status": "ok",
+      "features_returned": 3607,
+      "gold_matched": 10
+    },
+    "klima-hamburg-mitte": {
+      "status": "ok",
+      "features_returned": 395,
+      "gold_matched": 3
+    },
+    "fussverkehr-alsterdorf": {
+      "status": "ok",
+      "features_returned": 149,
+      "gold_matched": 1
+    },
+    "radverkehr-harburg": {
+      "status": "ok",
+      "features_returned": 1068,
+      "gold_matched": 7
+    },
+    "elbuferwanderweg-altona": {
+      "status": "ok",
+      "features_returned": 315,
+      "gold_matched": 1
+    },
+    "trockener-bach2025": {
+      "status": "ok",
+      "features_returned": 77,
+      "gold_matched": 1
+    },
+    "stek-langenhorn": {
+      "status": "ok",
+      "features_returned": 224,
+      "gold_matched": 2
+    },
+    "wochenmarkt-wandsbek": {
+      "status": "ok",
+      "features_returned": 231,
+      "gold_matched": 1
+    },
+    "bahnhof-altona": {
+      "status": "ok",
+      "features_returned": 402,
+      "gold_matched": 8
+    },
+    "klimaanpassung-nord": {
+      "status": "ok",
+      "features_returned": 209,
+      "gold_matched": 2
+    },
+    "harburg2050": {
+      "status": "ok",
+      "features_returned": 292,
+      "gold_matched": 1
+    },
+    "mobilwandel2035": {
+      "status": "ok",
+      "features_returned": 101,
+      "gold_matched": 2
+    },
+    "lindenallee": {
+      "status": "ok",
+      "features_returned": 239,
+      "gold_matched": 4
+    },
+    "gruenanlage-khw": {
+      "status": "ok",
+      "features_returned": 36,
+      "gold_matched": 1
+    },
+    "bezirksrouten-eimsbuettel": {
+      "status": "ok",
+      "features_returned": 464,
+      "gold_matched": 3
+    },
+    "hindenburgstrasse": {
+      "status": "ok",
+      "features_returned": 131,
+      "gold_matched": 1
+    },
+    "spielplatz-weidenallee": {
+      "status": "ok",
+      "features_returned": 34,
+      "gold_matched": 1
+    },
+    "wandsbek2045": {
+      "status": "ok",
+      "features_returned": 319,
+      "gold_matched": 3
+    },
+    "nahmobilitaet-schnelsen": {
+      "status": "ok",
+      "features_returned": 327,
+      "gold_matched": 3
+    },
+    "fahrrad-altona": {
+      "status": "ok",
+      "features_returned": 1609,
+      "gold_matched": 6
+    },
+    "radverkehr-eimsbuettel": {
+      "status": "ok",
+      "features_returned": 438,
+      "gold_matched": 3
+    },
+    "magistralen-wandsbek": {
+      "status": "ok",
+      "features_returned": 417,
+      "gold_matched": 2
+    },
+    "jungfernstieg": {
+      "status": "ok",
+      "features_returned": 363,
+      "gold_matched": 1
+    },
+    "fusswege-eidelstedt": {
+      "status": "ok",
+      "features_returned": 184,
+      "gold_matched": 2
+    },
+    "jenfelder-au": {
+      "status": "ok",
+      "features_returned": 23,
+      "gold_matched": 1
+    },
+    "fuhlsbuettel": {
+      "status": "ok",
+      "features_returned": 184,
+      "gold_matched": 2
+    }
+  },
+  "snapshot_file": "contribution_votes.parquet",
+  "note": "Only the gold contributions that map to exactly one project are fetched."
+}
