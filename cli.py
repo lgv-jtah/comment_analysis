@@ -43,6 +43,12 @@ from vote_ratio_hypothesis import (
     run_vote_analysis,
     run_vote_fetch,
 )
+from votes_stance_export import (
+    DEFAULT_MODELS as VS_DEFAULT_MODELS,
+    DEFAULT_PAIRS_PATH as VS_DEFAULT_PAIRS_PATH,
+    DEFAULT_VOTES_SNAPSHOT_DIR as VS_DEFAULT_VOTES_SNAPSHOT_DIR,
+    run_export as run_votes_stance_export,
+)
 
 console = Console()
 
@@ -492,7 +498,41 @@ def _run_vote_ratio_analyse(args: argparse.Namespace) -> None:
         console.print(f"[green]Wrote {path}[/green]")
 
 
+def _run_votes_stance_export(args: argparse.Namespace) -> None:
+    """Build the offline votes-vs-stance export for the evaluation backend.
+
+    Args:
+        args: Parsed `votes-stance-export` arguments: pairs, models (a list of
+            model names to include), votes_snapshot_dir and output_dir.
+    """
+    # Restrict the default model map to the requested names, preserving order.
+    model_paths = {name: VS_DEFAULT_MODELS[name] for name in args.models}
+    result = run_votes_stance_export(
+        pairs_path=Path(args.pairs),
+        model_paths=model_paths,
+        votes_snapshot_dir=Path(args.votes_snapshot_dir),
+        output_dir=Path(args.output_dir) if args.output_dir else None,
+    )
+    summary = result.summary
+    counts = summary["counts"]
+    console.print(
+        f"Votes/stance export: {counts['comments']} comments across "
+        f"{counts['contributions']} contributions; "
+        f"models: {', '.join(summary['available_models'])}."
+    )
+    console.print(f"Vote snapshot taken at: {summary['snapshot_utc']}.")
+    console.print(f"[dim]{summary['descriptive_only_note']}[/dim]")
+    for path in result.files.values():
+        console.print(f"[green]Wrote {path}[/green]")
+
+
 def build_parser() -> argparse.ArgumentParser:
+    """Build the top-level argument parser with every pipeline subcommand.
+
+    Returns:
+        A parser whose ``command`` subparsers each bind a ``func`` default to
+        the matching ``_run_*`` handler, dispatched by :func:`main`.
+    """
     parser = argparse.ArgumentParser(prog="cli.py", description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -708,6 +748,32 @@ def build_parser() -> argparse.ArgumentParser:
     vote_analyse_parser.add_argument("--seed", type=int, default=VR_BOOTSTRAP_SEED,
                                      help=f"Bootstrap seed (default: {VR_BOOTSTRAP_SEED}).")
     vote_analyse_parser.set_defaults(func=_run_vote_ratio_analyse)
+
+    votes_stance_parser = subparsers.add_parser(
+        "votes-stance-export",
+        help="Build the offline votes-vs-stance export for the evaluation backend. "
+        "No inference, no network (the vote snapshot is read from a frozen directory).",
+    )
+    votes_stance_parser.add_argument(
+        "--pairs", default=str(VS_DEFAULT_PAIRS_PATH),
+        help=f"Gold pairs parquet with the comment labels (default: {VS_DEFAULT_PAIRS_PATH}).",
+    )
+    votes_stance_parser.add_argument(
+        "--models", nargs="+", choices=sorted(VS_DEFAULT_MODELS),
+        default=sorted(VS_DEFAULT_MODELS),
+        help="Model names to include (default: all available models).",
+    )
+    votes_stance_parser.add_argument(
+        "--votes-snapshot-dir", default=str(VS_DEFAULT_VOTES_SNAPSHOT_DIR),
+        help="A completed vote-ratio-fetch directory, read only (default: the frozen "
+        f"snapshot {VS_DEFAULT_VOTES_SNAPSHOT_DIR}).",
+    )
+    votes_stance_parser.add_argument(
+        "--output-dir", default=None,
+        help="New directory to create (default: dataset/experiments/"
+        "votes_stance_export_<created_utc>); must not exist.",
+    )
+    votes_stance_parser.set_defaults(func=_run_votes_stance_export)
 
     return parser
 
