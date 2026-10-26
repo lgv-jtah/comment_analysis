@@ -186,6 +186,10 @@ and a symmetric contribution-level marker is a separate, later step.
 
 ### Open question 2026-10-07: blanket approval versus approval with own content
 
+*Superseded 2026-10-12 by the general-reaction split ([plan](reaction_split_plan.md)).
+The rule 1/2/3 pack is replaced: the annotator instead splits each comment into a general reaction and a rest text, and the rest alone decides the stance per key message.
+The `general-approval-review` subcommand and its module were removed; this section and the artifacts linked below are kept as the historical record, and the code is in the git history up to commit d45fd04.*
+
 Option C makes every `general_approval` pair `neutral`, but one question stays open: does approval that comes with own content ("Gute Idee, so reduzieren wir das Baumsterben.") count as support?
 Three rules are possible: rule 1, always `neutral`; rule 2, always `in_favor`; rule 3, `neutral` unless the approval comes with own content, then `in_favor`, either for all key messages or only for those the content addresses.
 Under every rule, a key message the comment actually discusses is judged on its own.
@@ -230,7 +234,7 @@ Approval with own content splits 14 `neutral` to 20 `in_favor`; these 20 are the
 The 18 mismatches without an approval formula, with a negation or irony cue, or with a back reference are candidates for a model error (B).
 
 **Review pack.**
-`uv run cli.py general-approval-review` builds everything offline from saved files, with no inference, no network and without loading `.env`; the annotation database is opened read-only and every input is hashed in the summary.
+`uv run cli.py general-approval-review` (removed 2026-10-12) built everything offline from saved files, with no inference, no network and without loading `.env`; the annotation database is opened read-only and every input is hashed in the summary.
 It writes a new directory and never overwrites one; `artifact_hashes.json` is written last as the completion marker.
 The current run wrote [the diagnostic table](../dataset/experiments/general_approval_review_20261007T133543733476Z/diagnostic_pairs.parquet), [the safe summary](../dataset/experiments/general_approval_review_20261007T133543733476Z/general_approval_review.safe_summary.json) (IDs and counts only), [the German review pack](../dataset/experiments/general_approval_review_20261007T133543733476Z/general_approval_review_pack_v1_20261007T133543733476Z.xlsx) and [the artifact hashes](../dataset/experiments/general_approval_review_20261007T133543733476Z/artifact_hashes.json).
 The pack's sheet "Anleitung" defines the three rules and shows what each rule, including both rule-3 scopes, produces for the same two invented comments (one blanket approval, one with own content), so no real comment is tied to a rule.
@@ -241,7 +245,7 @@ The heuristic cause sits only in a collapsed "Projektteam" group at the far righ
 Sheet "Kernbotschaften" asks per key message only whether the comment addresses it in content (ja, nein, unklar).
 Sheet "Übersicht" holds static numbers copied from the summary; the hidden sheets "Listen" and "Meta" carry the dropdown values, schema versions and expected IDs.
 The two answer sheets are not protected, because Excel blocks expanding column groups on protected sheets; the reader detects edited texts and IDs through row fingerprints instead, and only the text sheets "Anleitung" and "Übersicht" are protected without a password.
-`general_approval_review.read_review_pack` parses and validates a returned pack (schema version, IDs, row fingerprints, option values) without saving it; deriving A or B per case from her answers is a later step.
+`general_approval_review.read_review_pack` (removed 2026-10-12) parsed and validated a returned pack (schema version, IDs, row fingerprints, option values) without saving it; deriving A or B per case from her answers is a later step.
 
 **Constraints.**
 Folds 1-4 are held-out data and must not be used for tuning: any rule or prompt change tuned on these numbers turns them into development data.

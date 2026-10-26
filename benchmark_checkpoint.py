@@ -284,9 +284,19 @@ class BenchmarkCheckpoint:
                     raise RowValidationError("Invalid stance")
             if row["basis"] is not None and type(row["basis"]) is not str:
                 raise RowValidationError("Invalid basis")
-            accepted_bases = ("general_approval", "explicit_target", "explicit_exclusion", "unaddressed", "no_position")
+            accepted_bases = ("general_approval", "general_rejection", "explicit_target", "explicit_exclusion",
+                              "unaddressed", "no_position")
             if row["basis"] not in (None, "unresolved", *accepted_bases):
                 raise RowValidationError("Unknown output basis")
+            if row["general_reaction"] not in (None, True, False):
+                raise RowValidationError("Invalid general reaction")
+            if row["general_reaction_polarity"] not in (None, "positive", "negative") or (
+                    row["general_reaction_polarity"] is not None and row["general_reaction"] is not True):
+                raise RowValidationError("Invalid general reaction polarity")
+            if type(row["reaction_evidence"]) is not list or any(type(x) is not str for x in row["reaction_evidence"]):
+                raise RowValidationError("Invalid row list type")
+            if row["rest_text"] is not None and type(row["rest_text"]) is not str:
+                raise RowValidationError("Invalid rest text")
             if row["status"] == "accepted":
                 if (row["final_stance"] is None or row["final_stance"] != row["proposed_stance"]
                         or row["basis"] not in accepted_bases or row["review_reasons"]):

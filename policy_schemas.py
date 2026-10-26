@@ -64,6 +64,51 @@ def normalize_legacy_label(raw: str | None) -> StanceLabelV2 | None:
 
 
 # ---------------------------------------------------------------------------
+# Stage 0 (opt-in): general-reaction split
+# ---------------------------------------------------------------------------
+
+
+class ReactionPolarity(str, Enum):
+    """Direction of a comment's general reaction to the whole contribution."""
+
+    POSITIVE = "positive"
+    NEGATIVE = "negative"
+
+
+class ReactionSplitResult(BaseModel):
+    """Output of the split stage: general reaction versus the rest of a comment.
+
+    See docs/reaction_split_plan.md. A general reaction is the part of a
+    comment that approves or rejects the whole contribution without
+    addressing any specific content ("Super Idee!", "Bitte nicht."). The
+    stance stages then see only the rest.
+
+    Attributes:
+        has_general_reaction: Whether the comment contains a general reaction.
+        polarity: Required when has_general_reaction is True, None otherwise.
+            Judged by meaning, not wording (ironic praise is negative).
+        reaction_spans: Verbatim substrings of the comment that form the
+            general reaction. Empty when there is none.
+        hint_explanation: Concise German justification of the reaction.
+        rest_spans: Verbatim substrings of the comment that are not part of
+            the general reaction, in comment order. Empty when nothing else
+            remains.
+        split_possible: False when the reaction and the rest only make sense
+            together (e.g. the rest qualifies or reverses the reaction).
+        uncertainty_flags: Machine-readable reasons this call is uncertain,
+            e.g. "suspected_sarcasm".
+    """
+
+    has_general_reaction: bool
+    polarity: ReactionPolarity | None = None
+    reaction_spans: list[str] = Field(default_factory=list)
+    hint_explanation: str = ""
+    rest_spans: list[str] = Field(default_factory=list)
+    split_possible: bool = True
+    uncertainty_flags: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
 # Stage 1: scope and attribution
 # ---------------------------------------------------------------------------
 

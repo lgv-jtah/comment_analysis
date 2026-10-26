@@ -1149,10 +1149,11 @@ async def run_whole_process_v2() -> None:
     summary_path = output_path.with_name(f"{output_path.stem}_summary.parquet")
     summary_df = summarize_v2_by_key_message(result_df)
     summary_df.to_parquet(summary_path)
+    per_contribution = summary_df.drop_duplicates("contribution_id")
     console.print(
         f"[green]Per-key-message summary saved to {summary_path} - {len(summary_df)} rows, "
-        f"{int(summary_df.drop_duplicates('contribution_id').contribution_general_approval_comments.sum())} "
-        f"general-approval comments[/green]"
+        f"{int(per_contribution.contribution_general_approval_comments.sum())} general-approval comments, "
+        f"{int(per_contribution.contribution_general_rejection_comments.sum())} general-rejection comments[/green]"
     )
 
 

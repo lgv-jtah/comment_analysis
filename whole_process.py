@@ -74,11 +74,47 @@ OUTPUT_COLUMNS_V2 = [
     "source_evidence",
     "explanation",
     "review_reasons",
+    "general_reaction",
+    "general_reaction_polarity",
+    "reaction_evidence",
+    "rest_text",
     "policy_version",
     "run_id",
     "extraction_model_name",
     "stance_model_name",
 ]
+
+def pair_output_fields(pair_output) -> dict:
+    """The OUTPUT_COLUMNS_V2 values that come from one policy.PairOutput.
+
+    Shared by run_v2() and benchmark.run_benchmark() so both write the same
+    columns from the same fields.
+
+    Args:
+        pair_output: A policy.PairOutput.
+
+    Returns:
+        pair_id, status, stances, basis, evidence, explanation, review
+        reasons, the split columns, policy_version and run_id.
+    """
+    return {
+        "pair_id": pair_output.pair_id,
+        "status": pair_output.status,
+        "proposed_stance": pair_output.proposed_stance,
+        "final_stance": pair_output.final_stance,
+        "basis": pair_output.basis,
+        "comment_evidence": pair_output.comment_evidence,
+        "source_evidence": pair_output.source_evidence,
+        "explanation": pair_output.explanation,
+        "review_reasons": pair_output.review_reasons,
+        "general_reaction": pair_output.general_reaction,
+        "general_reaction_polarity": pair_output.general_reaction_polarity,
+        "reaction_evidence": pair_output.reaction_evidence,
+        "rest_text": pair_output.rest_text,
+        "policy_version": pair_output.policy_version,
+        "run_id": pair_output.run_id,
+    }
+
 
 # Per-key-message summary of a run_v2() result; see summarize_v2_by_key_message().
 SUMMARY_COLUMNS_V2 = [
@@ -90,37 +126,47 @@ SUMMARY_COLUMNS_V2 = [
     "against",
     "neutral",
     "general_approval",
+    "general_rejection",
     "needs_review",
     "failed",
     "contribution_comments",
     "contribution_general_approval_comments",
+    "contribution_general_rejection_comments",
 ]
 
 
 def summarize_v2_by_key_message(pairs: pd.DataFrame) -> pd.DataFrame:
-    """Count run_v2() outcomes per key message, with contribution-level general approval.
+    """Count run_v2() outcomes per key message, with contribution-level general reactions.
 
-    General approval of the whole contribution is neutral toward each key
-    message (docs/stance_policy_v2.md, option C), so it is counted in its own
-    ``general_approval`` column rather than in ``in_favor``. Per key message
-    the outcome columns are disjoint and sum to ``comments``:
+    A general reaction to the whole contribution is neutral toward each key
+    message (docs/stance_policy_v2.md, option C; docs/reaction_split_plan.md),
+    so it is counted in its own column rather than in ``in_favor`` or
+    ``against``. Per key message the outcome columns are disjoint and sum to
+    ``comments``:
 
     * ``in_favor`` / ``against``: accepted directional stances.
-    * ``neutral``: accepted neutral stances other than general approval.
-    * ``general_approval``: accepted rows with basis ``general_approval``.
+    * ``neutral``: accepted neutral stances other than general reactions.
+    * ``general_approval`` / ``general_rejection``: accepted rows with that
+      basis (comments that are only a general reaction).
     * ``needs_review`` / ``failed``: rows without a final stance.
 
-    ``contribution_comments`` and ``contribution_general_approval_comments``
-    repeat on every key message of a contribution. The output has no comment
-    ID, so identical comment texts within one contribution are told apart by
-    their row multiplicity: a text's occurrences are its row count on any key
-    message, and its general-approval comments are the maximum accepted
-    general-approval row count over its key messages. That is exact unless
-    two identical texts in one contribution received general approval on
-    different key messages.
+    ``contribution_comments``, ``contribution_general_approval_comments`` and
+    ``contribution_general_rejection_comments`` repeat on every key message
+    of a contribution. A comment counts as a general approval (rejection)
+    when any of its rows has an accepted general_approval
+    (general_rejection) basis or a positive (negative) split polarity, so a
+    reaction followed by own content is counted too. The output has no
+    comment ID, so identical comment texts within one contribution are told
+    apart by their row multiplicity: a text's occurrences are its row count
+    on any key message, and its general-reaction comments are the maximum
+    flagged row count over its key messages. That is exact unless two
+    identical texts in one contribution were flagged on different key
+    messages.
 
     Args:
-        pairs: A DataFrame with :data:`OUTPUT_COLUMNS_V2`.
+        pairs: A DataFrame with :data:`OUTPUT_COLUMNS_V2`. Frames written
+            before the split columns existed are accepted; their missing
+            polarity counts as none.
 
     Returns:
         One row per (contribution_id, key_message_id), with
@@ -133,27 +179,35 @@ def summarize_v2_by_key_message(pairs: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=SUMMARY_COLUMNS_V2)
 
     accepted = pairs["status"] == "accepted"
-    general = accepted & (pairs["basis"] == "general_approval")
+    general_approval = accepted & (pairs["basis"] == "general_approval")
+    general_rejection = accepted & (pairs["basis"] == "general_rejection")
     outcome = pd.Series(None, index=pairs.index, dtype=object)
     outcome[pairs["status"] == "needs_review"] = "needs_review"
     outcome[pairs["status"] == "failed"] = "failed"
     for label in ("in_favor", "against", "neutral"):
         outcome[accepted & (pairs["final_stance"] == label)] = label
-    outcome[general] = "general_approval"
+    outcome[general_approval] = "general_approval"
+    outcome[general_rejection] = "general_rejection"
     if outcome.isna().any():
         raise ValueError("Unexpected status/final_stance combination in run_v2 output")
 
+    polarity = pairs.get("general_reaction_polarity", pd.Series(None, index=pairs.index, dtype=object))
     keys = ["contribution_id", "key_message_id"]
-    frame = pairs[keys + ["key_message", "comment_text"]].assign(outcome=outcome, general=general)
+    frame = pairs[keys + ["key_message", "comment_text"]].assign(
+        outcome=outcome,
+        approval=general_approval | (polarity == "positive"),
+        rejection=general_rejection | (polarity == "negative"),
+    )
     counts = pd.crosstab([frame["contribution_id"], frame["key_message_id"]], frame["outcome"])
-    counts = counts.reindex(columns=SUMMARY_COLUMNS_V2[4:10], fill_value=0)
+    counts = counts.reindex(columns=SUMMARY_COLUMNS_V2[4:11], fill_value=0)
     counts["comments"] = counts.sum(axis=1)
 
     per_text = frame.groupby(["contribution_id", "comment_text", "key_message_id"], sort=False).agg(
-        rows=("outcome", "size"), general=("general", "sum"))
+        rows=("outcome", "size"), approval=("approval", "sum"), rejection=("rejection", "sum"))
     per_text = per_text.groupby(level=["contribution_id", "comment_text"], sort=False).max()
     per_contribution = per_text.groupby(level="contribution_id", sort=False).sum().rename(
-        columns={"rows": "contribution_comments", "general": "contribution_general_approval_comments"})
+        columns={"rows": "contribution_comments", "approval": "contribution_general_approval_comments",
+                 "rejection": "contribution_general_rejection_comments"})
 
     summary = frame[keys + ["key_message"]].drop_duplicates(keys).join(counts, on=keys)
     summary = summary.join(per_contribution, on="contribution_id")
@@ -585,6 +639,7 @@ class WholeProcess:
         proceeding_description: str = "",
         verifier_enabled: bool = False,
         verify_ionos: bool = True,
+        reaction_split_enabled: bool = False,
     ) -> pd.DataFrame:
         """Run the pipeline using the policy v2 engine (additive; run() is untouched).
 
@@ -618,6 +673,9 @@ class WholeProcess:
                 entry on the configured proxy. Set False only for offline
                 tests that mock the LLM calls entirely and have no proxy to
                 verify against.
+            reaction_split_enabled: Forwarded to StancePolicyEngineV2; runs
+                the general-reaction split stage first (opt-in until its
+                prompt exists, see docs/reaction_split_plan.md).
 
         Returns:
             A DataFrame with :data:`OUTPUT_COLUMNS_V2`; empty if no rows are
@@ -638,6 +696,7 @@ class WholeProcess:
             api_key=self._stance_api_key,
             enable_thinking=self._stance_enable_thinking,
             verifier_enabled=verifier_enabled,
+            reaction_split_enabled=reaction_split_enabled,
         )
 
         semaphore = asyncio.Semaphore(1)
@@ -727,17 +786,7 @@ class WholeProcess:
                                 "key_message_id": km_ref.key_message_id,
                                 "key_message": km_ref.text,
                                 "comment_text": comment_str,
-                                "pair_id": pair_output.pair_id,
-                                "status": pair_output.status,
-                                "proposed_stance": pair_output.proposed_stance,
-                                "final_stance": pair_output.final_stance,
-                                "basis": pair_output.basis,
-                                "comment_evidence": pair_output.comment_evidence,
-                                "source_evidence": pair_output.source_evidence,
-                                "explanation": pair_output.explanation,
-                                "review_reasons": pair_output.review_reasons,
-                                "policy_version": pair_output.policy_version,
-                                "run_id": pair_output.run_id,
+                                **pair_output_fields(pair_output),
                                 "extraction_model_name": self.extraction_model_name,
                                 "stance_model_name": self.stance_model_name,
                             }

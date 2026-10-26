@@ -315,6 +315,12 @@ def _schema_error_reasons(error: ValidationError, stage: str, target_ids=()) -> 
 
 
 class RevisableAttributionEngine:
+    """Opt-in revisable attribution engine.
+
+    It does not support the general-reaction split stage
+    (docs/reaction_split_plan.md); only policy.StancePolicyEngineV2 does.
+    """
+
     def __init__(self, llm_handler, base_url, model_name, api_key="", enable_thinking=False,
                  prompt_config_path=PROMPT_CONFIG, verifier_enabled=False, revisable_variant="baseline"):
         validate_revisable_variant(revisable_variant, verifier_enabled=verifier_enabled)

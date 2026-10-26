@@ -50,7 +50,7 @@ from revisable_attribution import (
     VARIANT_VERSION, validate_revisable_variant, variant_prompt_config, required_targets_schema,
     evidence_id_schemas, build_evidence_table, EVIDENCE_CONTRACT_VERSION, SEGMENTATION_VERSION, OFFSET_CONVENTION,
 )
-from whole_process import OUTPUT_COLUMNS_V2
+from whole_process import OUTPUT_COLUMNS_V2, pair_output_fields
 
 Mode = Literal["two_stage", "one_call", "revisable_attribution"]
 
@@ -493,17 +493,7 @@ async def run_benchmark(
                         "key_message_id": km_ref.key_message_id,
                         "key_message": km_ref.text,
                         "comment_text": entry["comment_text"],
-                        "pair_id": pair_output.pair_id,
-                        "status": pair_output.status,
-                        "proposed_stance": pair_output.proposed_stance,
-                        "final_stance": pair_output.final_stance,
-                        "basis": pair_output.basis,
-                        "comment_evidence": pair_output.comment_evidence,
-                        "source_evidence": pair_output.source_evidence,
-                        "explanation": pair_output.explanation,
-                        "review_reasons": pair_output.review_reasons,
-                        "policy_version": pair_output.policy_version,
-                        "run_id": pair_output.run_id,
+                        **pair_output_fields(pair_output),
                         "extraction_model_name": None,
                         "stance_model_name": model_name,
                     }

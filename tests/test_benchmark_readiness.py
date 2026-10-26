@@ -62,7 +62,9 @@ def test_benchmark_prepares_before_inference_and_scores_explicit_subset(tmp_path
         checkpoint = kwargs["checkpoint"]
         records = [{**identity, "status": "accepted", "proposed_stance": "neutral", "final_stance": "neutral",
                     "basis": "unaddressed", "comment_evidence": [], "source_evidence": [],
-                    "explanation": "", "review_reasons": []} for identity in checkpoint.identities[0]]
+                    "explanation": "", "review_reasons": [], "general_reaction": None,
+                    "general_reaction_polarity": None, "reaction_evidence": [], "rest_text": None}
+                   for identity in checkpoint.identities[0]]
         records[1].update(status="failed", proposed_stance=None, final_stance=None, basis=None,
                           review_reasons=["llm_call_failed"])
         checkpoint.commit_comment(records)

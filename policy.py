@@ -15,7 +15,8 @@ docs/stance_policy_v2.md for the policy this implements.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from string import Template
 from typing import Literal
@@ -28,6 +29,8 @@ from llm_handler import LLMHandler
 from policy_schemas import (
     NeutralBasis,
     PerTargetStanceResult,
+    ReactionPolarity,
+    ReactionSplitResult,
     ScopeAttributionResult,
     ScopeType,
     StanceLabelV2,
@@ -43,6 +46,15 @@ POLICY_VERSION = "v2"
 # signal via basis="general_approval", not as support for each key message.
 # Every general_approval row therefore carries this stance.
 GENERAL_APPROVAL_STANCE = StanceLabelV2.NEUTRAL
+# General rejection is the symmetric contribution-level signal, recorded
+# with basis="general_rejection" (docs/reaction_split_plan.md). Only the
+# opt-in reaction split stage produces it.
+GENERAL_REJECTION_STANCE = StanceLabelV2.NEUTRAL
+GENERAL_REACTION_BASES = frozenset({"general_approval", "general_rejection"})
+_BASIS_BY_POLARITY = {ReactionPolarity.POSITIVE: "general_approval", ReactionPolarity.NEGATIVE: "general_rejection"}
+_STANCE_BY_POLARITY = {ReactionPolarity.POSITIVE: GENERAL_APPROVAL_STANCE,
+                       ReactionPolarity.NEGATIVE: GENERAL_REJECTION_STANCE}
+REACTION_SPLIT_PROMPT_KEY = "reaction_split"
 
 PairStatus = Literal["accepted", "needs_review", "failed"]
 
@@ -77,6 +89,80 @@ def restates_general_approval(target_evidence: list[str], general_evidence: list
     return bool(general) and bool(target) and all(any(quote in span for span in general) for quote in target)
 
 
+def _locate_spans(spans: list[str], comment: str) -> tuple[list[bool], bool]:
+    """Mark where non-overlapping spans occur in a comment.
+
+    Longer spans are placed first, so a short span that also occurs inside
+    a longer one (e.g. "gut" in "gut gemacht") takes a later occurrence
+    instead of blocking the longer span.
+
+    Args:
+        spans: Whitespace-normalized, non-empty spans, each a substring of
+            comment.
+        comment: The whitespace-normalized comment.
+
+    Returns:
+        A tuple of the per-character coverage mask and whether every span
+        found a place that no other span covers.
+    """
+    covered = [False] * len(comment)
+    for span in sorted(spans, key=len, reverse=True):
+        start = comment.find(span)
+        while start != -1 and any(covered[start:start + len(span)]):
+            start = comment.find(span, start + 1)
+        if start == -1:
+            return covered, False
+        covered[start:start + len(span)] = [True] * len(span)
+    return covered, True
+
+
+def validate_reaction_split(split: ReactionSplitResult, comment_text: str) -> list[str]:
+    """Check a reaction split against its comment (pure).
+
+    Every span must be a whitespace-normalized substring of the comment.
+    When the model says the split is possible, the reaction and rest spans
+    must also fit into the comment without overlapping and together cover
+    every letter and digit of it (only punctuation, spaces and symbols may
+    be left over). A reaction needs a polarity and evidence; no reaction
+    means neither. A comment with neither a reaction nor a rest is invalid.
+
+    Args:
+        split: The split stage's output.
+        comment_text: The full comment text.
+
+    Returns:
+        Machine-readable error codes; empty when the split is valid.
+    """
+    errors: list[str] = []
+    comment = _normalize_whitespace(comment_text)
+    reaction = [_normalize_whitespace(s) for s in split.reaction_spans if s.strip()]
+    rest = [_normalize_whitespace(s) for s in split.rest_spans if s.strip()]
+    if split.has_general_reaction:
+        if split.polarity is None:
+            errors.append("general_reaction_missing_polarity")
+        if not reaction:
+            errors.append("general_reaction_missing_evidence")
+    else:
+        if split.polarity is not None:
+            errors.append("polarity_without_general_reaction")
+        if reaction:
+            errors.append("reaction_spans_without_general_reaction")
+        if not rest:
+            errors.append("empty_split")
+    if any(span not in comment for span in reaction):
+        errors.append("reaction_span_not_substring_of_comment")
+    if any(span not in comment for span in rest):
+        errors.append("rest_span_not_substring_of_comment")
+    if errors or not split.split_possible:
+        return errors
+    covered, placed = _locate_spans(reaction + rest, comment)
+    if not placed:
+        errors.append("split_spans_overlap")
+    elif any(char.isalnum() and not hit for char, hit in zip(comment, covered)):
+        errors.append("split_does_not_cover_comment")
+    return errors
+
+
 @dataclass
 class PairOutput:
     """One (comment, key message) result, matching the brief section 7 contract.
@@ -99,6 +185,17 @@ class PairOutput:
         review_reasons: Review or failure reasons; empty for accepted results.
         policy_version: Always "v2" for results from this engine.
         run_id: Carried from the CommentContext this result came from.
+        general_reaction: Comment-level result of the reaction split stage,
+            repeated on every pair of the comment: whether the comment has a
+            general reaction. None when the split stage is disabled or its
+            output was unusable.
+        general_reaction_polarity: "positive" or "negative" when
+            general_reaction is True, else None.
+        reaction_evidence: Verbatim comment substrings forming the general
+            reaction; empty without one.
+        rest_text: The comment without its general reaction (the text the
+            stance stages saw); "" when nothing remains, None when the split
+            stage is disabled or its output was unusable.
     """
 
     pair_id: str
@@ -113,6 +210,10 @@ class PairOutput:
     review_reasons: list[str] = field(default_factory=list)
     policy_version: str = POLICY_VERSION
     run_id: str = ""
+    general_reaction: bool | None = None
+    general_reaction_polarity: str | None = None
+    reaction_evidence: list[str] = field(default_factory=list)
+    rest_text: str | None = None
 
 
 def _normalize_stance_fields(raw: dict) -> dict:
@@ -209,7 +310,15 @@ def _failed(context: CommentContext, km: KeyMessageRef, reasons: list[str] | Non
 
 
 class StancePolicyEngineV2:
-    """Resolves stances for a whole comment against every key message at once."""
+    """Resolves stances for a whole comment against every key message at once.
+
+    With reaction_split_enabled, a split stage first separates the comment's
+    general reaction from the rest (docs/reaction_split_plan.md); the scope
+    and stance stages then see only the rest. The split stage is opt-in until
+    its prompt is written from the annotator's labels (plan phase 3), and
+    only this engine supports it: OneCallPolicyEngineV2 and
+    revisable_attribution.RevisableAttributionEngine do not.
+    """
 
     def __init__(
         self,
@@ -220,6 +329,7 @@ class StancePolicyEngineV2:
         enable_thinking: bool = False,
         prompt_config_path: str = DEFAULT_PROMPT_CONFIG_PATH,
         verifier_enabled: bool = False,
+        reaction_split_enabled: bool = False,
     ) -> None:
         """Initialize the engine and load the policy v2 prompt templates.
 
@@ -235,6 +345,13 @@ class StancePolicyEngineV2:
                 disagreement. Off by default -- see brief section 7:
                 "Test whether it improves accepted accuracy ... before
                 enabling it by default."
+            reaction_split_enabled: When True, run the general-reaction split
+                stage before scope and stance. Requires a "reaction_split"
+                entry in the prompt config. Off by default.
+
+        Raises:
+            ValueError: If reaction_split_enabled is True and the prompt
+                config has no "reaction_split" entry.
         """
         self._llm = llm_handler
         self._base_url = base_url
@@ -242,6 +359,7 @@ class StancePolicyEngineV2:
         self._api_key = api_key
         self._enable_thinking = enable_thinking
         self._verifier_enabled = verifier_enabled
+        self._reaction_split_enabled = reaction_split_enabled
 
         detector = StanceDetector()
         scope_cfg = detector.load_prompt_config(prompt_config_path, "scope_attribution")
@@ -250,33 +368,53 @@ class StancePolicyEngineV2:
         self._scope_user_template = Template(scope_cfg["user_template"])
         self._stance_system = stance_cfg["system"]
         self._stance_user_template = Template(stance_cfg["user_template"])
+        if reaction_split_enabled:
+            with open(prompt_config_path, encoding="utf-8") as f:
+                available = json.load(f)
+            # load_prompt_config exits the process on a missing key; a clear exception is better here.
+            if REACTION_SPLIT_PROMPT_KEY not in available:
+                raise ValueError(f"Prompt config {prompt_config_path} has no {REACTION_SPLIT_PROMPT_KEY!r} entry; "
+                                 "the split prompt is written in phase 3 of docs/reaction_split_plan.md")
+            split_cfg = detector.load_prompt_config(prompt_config_path, REACTION_SPLIT_PROMPT_KEY)
+            self._split_system = split_cfg["system"]
+            self._split_user_template = Template(split_cfg["user_template"])
 
     # -- prompt building ----------------------------------------------------
 
-    def _build_scope_messages(self, context: CommentContext) -> tuple[str, list[dict]]:
-        user = self._scope_user_template.safe_substitute(
+    def _build_split_messages(self, context: CommentContext) -> tuple[str, list[dict]]:
+        user = self._split_user_template.safe_substitute(
             contribution_text=context.contribution_text or "(nicht verfügbar)",
             key_messages_block=_format_key_messages_block(context.key_messages),
             comment_text=context.comment_text,
         )
+        return self._split_system, [{"role": "user", "content": user}]
+
+    def _build_scope_messages(self, context: CommentContext, full_comment_text: str) -> tuple[str, list[dict]]:
+        # $full_comment_text lets a template show the whole comment as read-only context next to the
+        # rest text in $comment_text; templates without the placeholder ignore it.
+        user = self._scope_user_template.safe_substitute(
+            contribution_text=context.contribution_text or "(nicht verfügbar)",
+            key_messages_block=_format_key_messages_block(context.key_messages),
+            comment_text=context.comment_text,
+            full_comment_text=full_comment_text,
+        )
         return self._scope_system, [{"role": "user", "content": user}]
 
     def _build_stance_messages(
-        self, context: CommentContext, target_kms: list[KeyMessageRef]
+        self, context: CommentContext, target_kms: list[KeyMessageRef], full_comment_text: str
     ) -> tuple[str, list[dict]]:
         user = self._stance_user_template.safe_substitute(
             contribution_text=context.contribution_text or "(nicht verfügbar)",
             key_messages_block=_format_key_messages_block(target_kms),
             comment_text=context.comment_text,
+            full_comment_text=full_comment_text,
         )
         return self._stance_system, [{"role": "user", "content": user}]
 
     # -- stage calls ----------------------------------------------------------
 
-    async def _call_scope_stage(
-        self, client: httpx.AsyncClient, semaphore, context: CommentContext
-    ) -> ScopeAttributionResult | None:
-        system, messages = self._build_scope_messages(context)
+    async def _call_structured(self, client, semaphore, system, messages, schema, normalize=None):
+        """One structured LLM call, parsed into schema; None on failure or invalid output."""
         raw = await self._llm.call_model(
             client=client,
             base_url=self._base_url,
@@ -286,14 +424,26 @@ class StancePolicyEngineV2:
             semaphore=semaphore,
             enable_thinking=self._enable_thinking,
             api_key=self._api_key,
-            response_schema=ScopeAttributionResult,
+            response_schema=schema,
         )
         if raw is None:
             return None
         try:
-            return ScopeAttributionResult.model_validate(raw)
+            return schema.model_validate(normalize(raw) if normalize else raw)
         except Exception:
             return None
+
+    async def _call_split_stage(
+        self, client: httpx.AsyncClient, semaphore, context: CommentContext
+    ) -> ReactionSplitResult | None:
+        system, messages = self._build_split_messages(context)
+        return await self._call_structured(client, semaphore, system, messages, ReactionSplitResult)
+
+    async def _call_scope_stage(
+        self, client: httpx.AsyncClient, semaphore, context: CommentContext, full_comment_text: str | None = None
+    ) -> ScopeAttributionResult | None:
+        system, messages = self._build_scope_messages(context, full_comment_text or context.comment_text)
+        return await self._call_structured(client, semaphore, system, messages, ScopeAttributionResult)
 
     async def _call_stance_stage(
         self,
@@ -301,54 +451,49 @@ class StancePolicyEngineV2:
         semaphore,
         context: CommentContext,
         target_kms: list[KeyMessageRef],
+        full_comment_text: str | None = None,
     ) -> PerTargetStanceResult | None:
-        system, messages = self._build_stance_messages(context, target_kms)
-        raw = await self._llm.call_model(
-            client=client,
-            base_url=self._base_url,
-            model_name=self._model_name,
-            system=system,
-            messages=messages,
-            semaphore=semaphore,
-            enable_thinking=self._enable_thinking,
-            api_key=self._api_key,
-            response_schema=PerTargetStanceResult,
-        )
-        if raw is None:
-            return None
-        try:
-            return PerTargetStanceResult.model_validate(_normalize_stance_fields(raw))
-        except Exception:
-            return None
+        system, messages = self._build_stance_messages(context, target_kms, full_comment_text or context.comment_text)
+        return await self._call_structured(
+            client, semaphore, system, messages, PerTargetStanceResult, _normalize_stance_fields)
 
     # -- validation -----------------------------------------------------------
 
     @staticmethod
-    def _validate_scope(scope: ScopeAttributionResult, context: CommentContext) -> list[str]:
+    def _grounded(evidence: str, texts: list[str]) -> bool:
+        """Whether a quote is a whitespace-normalized substring of every given text."""
+        quote = _normalize_whitespace(evidence)
+        return all(quote in _normalize_whitespace(text) for text in texts)
+
+    @staticmethod
+    def _validate_scope(
+        scope: ScopeAttributionResult, context: CommentContext, extra_texts: list[str] | None = None
+    ) -> list[str]:
         errors = []
         valid_ids = {km.key_message_id for km in context.key_messages}
         for kid in scope.affected_key_message_ids:
             if kid not in valid_ids:
                 errors.append(f"unknown_key_message_id:{kid}")
-        normalized_comment = _normalize_whitespace(context.comment_text)
+        texts = [context.comment_text, *(extra_texts or [])]
         for evidence in scope.comment_evidence:
-            if _normalize_whitespace(evidence) not in normalized_comment:
+            if not StancePolicyEngineV2._grounded(evidence, texts):
                 errors.append("evidence_not_substring_of_comment")
         return errors
 
     @staticmethod
     def _validate_stance(
-        result: PerTargetStanceResult, context: CommentContext, allowed_ids: set[str]
+        result: PerTargetStanceResult, context: CommentContext, allowed_ids: set[str],
+        extra_texts: list[str] | None = None,
     ) -> list[str]:
         errors = []
         related_by_id = {km.key_message_id: set(km.related_sentences) for km in context.key_messages}
-        normalized_comment = _normalize_whitespace(context.comment_text)
+        texts = [context.comment_text, *(extra_texts or [])]
         for target in result.targets:
             if target.key_message_id not in allowed_ids:
                 errors.append(f"unknown_key_message_id:{target.key_message_id}")
                 continue
             for evidence in target.comment_evidence:
-                if _normalize_whitespace(evidence) not in normalized_comment:
+                if not StancePolicyEngineV2._grounded(evidence, texts):
                     errors.append("evidence_not_substring_of_comment")
             related = related_by_id.get(target.key_message_id, set())
             normalized_related = {_normalize_whitespace(s) for s in related}
@@ -364,16 +509,76 @@ class StancePolicyEngineV2:
     async def _resolve_once(
         self, client: httpx.AsyncClient, semaphore, context: CommentContext
     ) -> dict[str, PairOutput]:
-        """One full pass through both stages, without the verifier."""
-        kms = context.key_messages
-        if not kms:
+        """One full pass through all stages, without the verifier."""
+        if not context.key_messages:
             return {}
+        if self._reaction_split_enabled:
+            return await self._resolve_with_split(client, semaphore, context)
+        return await self._resolve_stages(client, semaphore, context, context)
 
-        scope = await self._call_scope_stage(client, semaphore, context)
+    async def _resolve_with_split(
+        self, client: httpx.AsyncClient, semaphore, context: CommentContext
+    ) -> dict[str, PairOutput]:
+        """Split stage, then scope and stance on the rest text.
+
+        A comment that is only a general reaction gets basis
+        general_approval or general_rejection (neutral) on every key message
+        without further calls. Otherwise the scope and stance stages see the
+        rest text as the comment, their evidence must lie in the rest and in
+        the original comment, and the comment-level split result is attached
+        to every pair.
+        """
+        kms = context.key_messages
+        split = await self._call_split_stage(client, semaphore, context)
+        if split is None:
+            return {km.key_message_id: _failed(context, km) for km in kms}
+        errors = validate_reaction_split(split, context.comment_text)
+        if errors:
+            return {km.key_message_id: _needs_review(context, km, ["invalid_split_output"] + errors) for km in kms}
+
+        rest = " ".join(_normalize_whitespace(s) for s in split.rest_spans if s.strip())
+        reaction_evidence = [s for s in split.reaction_spans if s.strip()]
+        split_fields = dict(
+            general_reaction=split.has_general_reaction,
+            general_reaction_polarity=split.polarity.value if split.polarity else None,
+            reaction_evidence=reaction_evidence,
+            rest_text=rest,
+        )
+        if not split.split_possible:
+            outputs = {km.key_message_id: _needs_review(context, km, ["split_not_possible", *split.uncertainty_flags])
+                       for km in kms}
+        elif not rest:
+            # Validation guarantees a reaction with a polarity when nothing else remains.
+            basis, stance = _BASIS_BY_POLARITY[split.polarity], _STANCE_BY_POLARITY[split.polarity]
+            outputs = {km.key_message_id: _accepted(context, km, stance, basis, reaction_evidence, [],
+                                                    split.hint_explanation) for km in kms}
+        else:
+            stage_context = context.model_copy(update={"comment_text": rest})
+            outputs = await self._resolve_stages(client, semaphore, context, stage_context)
+        return {kid: replace(output, **split_fields) for kid, output in outputs.items()}
+
+    async def _resolve_stages(
+        self, client: httpx.AsyncClient, semaphore, context: CommentContext, stage_context: CommentContext
+    ) -> dict[str, PairOutput]:
+        """Scope and stance stages over stage_context; outputs are identified by context.
+
+        Without the split stage both contexts are the same. With it,
+        stage_context carries the rest text as its comment: a general
+        reaction found there is a split error (review), and general support
+        never extends to unaddressed key messages, because the general
+        reaction is recorded by the split stage instead.
+        """
+        kms = context.key_messages
+        split_mode = stage_context is not context
+        full_text = context.comment_text
+        # In split mode evidence must lie in the rest text and in the original comment.
+        extra_texts = [full_text] if split_mode else None
+
+        scope = await self._call_scope_stage(client, semaphore, stage_context, full_text)
         if scope is None:
             return {km.key_message_id: _failed(context, km) for km in kms}
 
-        scope_errors = self._validate_scope(scope, context)
+        scope_errors = self._validate_scope(scope, stage_context, extra_texts)
         if scope_errors:
             return {
                 km.key_message_id: _needs_review(context, km, ["invalid_scope_output"] + scope_errors)
@@ -383,6 +588,9 @@ class StancePolicyEngineV2:
         outputs: dict[str, PairOutput] = {}
 
         if scope.scope_type == ScopeType.WHOLE_CONTRIBUTION_APPROVAL:
+            if split_mode:
+                return {km.key_message_id: _needs_review(context, km, ["general_reaction_in_rest_text"])
+                        for km in kms}
             for km in kms:
                 outputs[km.key_message_id] = _accepted(
                     context, km, GENERAL_APPROVAL_STANCE, "general_approval",
@@ -397,16 +605,22 @@ class StancePolicyEngineV2:
                 )
             return outputs
 
+        extends_to_unaddressed = (
+            not split_mode
+            and scope.scope_type == ScopeType.MIXED_QUALIFIED
+            and bool(scope.general_support_extends_to_unaddressed)
+        )
+
         # TARGET_SPECIFIC or MIXED_QUALIFIED
         affected = [km for km in kms if km.key_message_id in scope.affected_key_message_ids]
         if affected:
-            stance_result = await self._call_stance_stage(client, semaphore, context, affected)
+            stance_result = await self._call_stance_stage(client, semaphore, stage_context, affected, full_text)
             if stance_result is None:
                 for km in affected:
                     outputs[km.key_message_id] = _failed(context, km)
             else:
                 stance_errors = self._validate_stance(
-                    stance_result, context, {km.key_message_id for km in affected}
+                    stance_result, stage_context, {km.key_message_id for km in affected}, extra_texts
                 )
                 if stance_errors:
                     for km in affected:
@@ -428,8 +642,7 @@ class StancePolicyEngineV2:
                             basis = target.neutral_basis.value if target.neutral_basis else NeutralBasis.NO_POSITION.value
                         elif (
                             target.stance == StanceLabelV2.IN_FAVOR
-                            and scope.scope_type == ScopeType.MIXED_QUALIFIED
-                            and scope.general_support_extends_to_unaddressed
+                            and extends_to_unaddressed
                             and restates_general_approval(target.comment_evidence, scope.comment_evidence)
                         ):
                             basis, evidence = "general_approval", scope.comment_evidence
@@ -444,7 +657,7 @@ class StancePolicyEngineV2:
         for km in kms:
             if km.key_message_id in outputs:
                 continue
-            if scope.scope_type == ScopeType.MIXED_QUALIFIED and scope.general_support_extends_to_unaddressed:
+            if extends_to_unaddressed:
                 outputs[km.key_message_id] = _accepted(
                     context, km, GENERAL_APPROVAL_STANCE, "general_approval",
                     scope.comment_evidence, [], scope.explanation,
@@ -461,11 +674,13 @@ class StancePolicyEngineV2:
     ) -> list[PairOutput]:
         """Resolve every key message's stance for one comment.
 
-        Runs the scope/attribution stage, then (when applicable) the
-        per-target stance stage, validates both against the real context,
-        and applies the general-approval rule deterministically. When
-        verifier_enabled is True, an independent second pass is compared
-        against the first and any disagreement routes that pair to review.
+        Runs the optional reaction split stage, the scope/attribution stage,
+        then (when applicable) the per-target stance stage, validates each
+        against the real context, and applies the general-reaction rules
+        deterministically. When verifier_enabled is True, an independent
+        second pass is compared against the first and any disagreement
+        (final stance, general-reaction basis, or the split's general
+        reaction and polarity) routes that pair to review.
 
         Args:
             client: Async HTTP client for the LLM requests.
@@ -487,15 +702,22 @@ class StancePolicyEngineV2:
                     continue
                 if p.status == "accepted" and v.status == "accepted" and (
                     p.final_stance != v.final_stance
-                    # General approval and an unaddressed message are both
-                    # neutral now; disagreeing on that is still a disagreement.
-                    or (p.basis == "general_approval") != (v.basis == "general_approval")
+                    # A general reaction and an unaddressed message are both
+                    # neutral; disagreeing on that is still a disagreement.
+                    or _general_basis(p) != _general_basis(v)
+                    or (p.general_reaction, p.general_reaction_polarity)
+                    != (v.general_reaction, v.general_reaction_polarity)
                 ):
                     primary[km.key_message_id] = _needs_review(
                         context, km, ["verifier_disagreement"]
                     )
 
         return [primary[km.key_message_id] for km in context.key_messages]
+
+
+def _general_basis(output: PairOutput) -> str | None:
+    """The output's basis when it is a general reaction, else None."""
+    return output.basis if output.basis in GENERAL_REACTION_BASES else None
 
 
 class OneCallPolicyEngineV2:
@@ -508,7 +730,8 @@ class OneCallPolicyEngineV2:
     this comment, every target must be covered exactly once, and every
     evidence quote must be an exact substring of the comment text. Invalid
     or failed output never becomes a silent accepted+neutral result, same
-    as the two-stage engine.
+    as the two-stage engine. It does not support the general-reaction split
+    stage (docs/reaction_split_plan.md); only StancePolicyEngineV2 does.
     """
 
     def __init__(

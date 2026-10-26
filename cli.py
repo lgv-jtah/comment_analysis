@@ -4,9 +4,9 @@ Separate from main.py's interactive menu (which keeps driving the existing
 fetch/sample/extract/judge/whole-process flows unchanged). Subcommands:
 `audit` (Phase 1), `benchmark`/`evaluate` (Phase 4),
 `historical-baseline`/`post-fix-baseline` (saved baselines) and
-`general-approval-review` (offline review pack for the open general-approval
-question; no inference, never loads .env); `export-review` lands in a later
-phase.
+`reaction-split-pack`/`reaction-split-read` (offline annotation pack for the
+general-reaction split and its read-back; no inference, never loads .env);
+`export-review` lands in a later phase.
 """
 from __future__ import annotations
 
@@ -26,10 +26,10 @@ from benchmark import run_benchmark, prepare_benchmark
 from benchmark_checkpoint import BenchmarkCheckpoint, BudgetExhausted
 from dataset_builder import build_dataset, write_dataset
 from fold_builder import load_folds
-from general_approval_review import (
-    DEFAULT_ANNOTATIONS_DB, DEFAULT_RUNS, DEFAULT_SOURCES, RunSpec, run_general_approval_review,
-)
 from historical_baseline import build_historical_predictions, build_post_fix_baseline_predictions
+from reaction_split_review import (
+    DEFAULT_EXTRA_SOURCE, DEFAULT_POPULATION_DIR, export_reaction_split_labels, run_reaction_split_pack,
+)
 from revisable_attribution import REVISABLE_VARIANTS, validate_revisable_variant
 
 console = Console()
@@ -358,57 +358,66 @@ def _run_post_fix_baseline(args: argparse.Namespace) -> None:
         _print_metrics("Overall", evaluator_v2.evaluate(predictions, reference))
 
 
-def _run_general_approval_review(args: argparse.Namespace) -> None:
-    """Build the offline general-approval review pack; never loads .env, no inference.
-
-    Writes the artifacts via general_approval_review.run_general_approval_review
-    and prints the scored general-approval counts per total, run and fold,
-    the annotator-note counts, the pack size and the written paths.
+def _run_reaction_split_pack(args: argparse.Namespace) -> None:
+    """Build the blank general-reaction split annotation pack; never loads .env, no inference.
 
     Args:
-        args: Parsed `general-approval-review` arguments: run (list of
-            [NAME, PREDICTIONS, EXPECTED] or None for DEFAULT_RUNS), reference,
-            folds, annotations, source (list or None for DEFAULT_SOURCES),
-            role, tiers ("A", "A+B" or "B") and output_dir (or None).
+        args: Parsed `reaction-split-pack` arguments: population_dir,
+            extra_fold0_source, no_extra_fold0, folds and output_dir (or
+            None).
 
     Raises:
-        FileNotFoundError: If an input file or the output directory's parent
-            is missing.
+        FileNotFoundError: If an input or the output directory's parent is
+            missing.
         FileExistsError: If the output directory already exists.
-        RuntimeError: If an input file changed during the run.
-        ValueError: If the inputs are inconsistent.
+        RuntimeError: If the population file changed since it was written.
+        ValueError: If the population is inconsistent.
     """
-    runs = [RunSpec(name, Path(pred), Path(exp)) for name, pred, exp in args.run] if args.run else DEFAULT_RUNS
-    result = run_general_approval_review(
-        runs=runs,
-        reference_path=Path(args.reference),
+    result = run_reaction_split_pack(
+        population_dir=Path(args.population_dir),
+        extra_source=None if args.no_extra_fold0 else Path(args.extra_fold0_source),
         folds_path=Path(args.folds),
-        annotations_path=Path(args.annotations),
-        source_paths=[Path(p) for p in args.source] if args.source else DEFAULT_SOURCES,
-        role=args.role,
-        # "A+B" -> ["A", "B"]
-        tiers=args.tiers.split("+"),
         output_dir=Path(args.output_dir) if args.output_dir else None,
     )
     summary = result.summary
-    scored = summary["scored_general_approval"]
-    table = Table(title="Accepted general_approval pairs with a resolved reference")
-    for column in ("group", "pairs", "correct", "neutral", "in_favor", "against", "comments"):
-        table.add_column(column, justify="left" if column == "group" else "right")
-    groups = [("total", scored["total"])]
-    groups += [(f"run {name}", block) for name, block in scored["by_run"].items()]
-    groups += [(f"fold {fold}", block) for fold, block in scored["by_fold"].items()]
-    for name, block in groups:
-        labels = block["reference_labels"]
-        table.add_row(name, str(block["pairs"]), str(block["correct"]), str(labels.get("neutral", 0)),
-                      str(labels.get("in_favor", 0)), str(labels.get("against", 0)), str(block["comments"]))
-    console.print(table)
-    notes, pack = summary["annotator_notes"], summary["pack"]
-    console.print(f"Annotator general-approval notes: {notes['general_approval_broad']['pairs']} pairs (broad), "
-                  f"{notes['general_approval_strict']['pairs']} (strict)")
-    console.print(f"Review pack: {pack['comments']} comments ({pack['comments_outside_runs']} outside runs), "
-                  f"{pack['key_message_rows']} key-message rows")
-    console.print("[dim]Offline analysis only: no inference, no network, .env not loaded.[/dim]")
+    folds = ", ".join(f"{fold}: {count}" for fold, count in summary["comments_by_fold"].items())
+    console.print(f"Annotation pack: {summary['comments']} comments, {summary['key_message_rows']} key-message rows "
+                  f"({summary['comments_from_review_2026_10_07']} from the 2026-10-07 review, "
+                  f"{summary['comments_added_from_fold_0']} added from fold 0)")
+    console.print(f"Comments by fold: {folds}")
+    console.print(f"[dim]{summary['heldout_note']}[/dim]")
+    console.print("[dim]Offline only: no inference, no network, .env not loaded.[/dim]")
+    for path in result.files.values():
+        console.print(f"[green]Wrote {path}[/green]")
+
+
+def _run_reaction_split_read(args: argparse.Namespace) -> None:
+    """Read a filled split pack and write its labels as a new, versioned label set.
+
+    Args:
+        args: Parsed `reaction-split-read` arguments: pack and output_dir
+            (or None).
+
+    Raises:
+        FileExistsError: If the output directory already exists.
+        ValueError: If the pack is invalid or was edited outside its answer
+            cells.
+    """
+    result = export_reaction_split_labels(
+        Path(args.pack), output_dir=Path(args.output_dir) if args.output_dir else None)
+    summary = result.summary
+    console.print(f"Comments: {summary['comments']} ({summary['comments_without_issues']} without issues); "
+                  f"key-message rows: {summary['key_message_rows']} "
+                  f"({summary['key_message_rows_without_issues']} without issues)")
+    for title, key in (("General reaction", "general_reaction"), ("Polarity", "polarity"),
+                       ("Stance of the rest text", "stance"), ("Comment issues", "comment_issues"),
+                       ("Key-message issues", "key_message_issues")):
+        table = Table(title=title)
+        table.add_column("value")
+        table.add_column("count", justify="right")
+        for value, count in summary[key].items():
+            table.add_row(value, str(count))
+        console.print(table)
     for path in result.files.values():
         console.print(f"[green]Wrote {path}[/green]")
 
@@ -544,31 +553,41 @@ def build_parser() -> argparse.ArgumentParser:
     )
     post_fix_parser.set_defaults(func=_run_post_fix_baseline)
 
-    review_parser = subparsers.add_parser(
-        "general-approval-review",
-        help="Offline review pack for the open general-approval question (diagnostic parquet, safe summary, "
-        "German xlsx). No inference, no network, never loads .env.",
+    pack_parser = subparsers.add_parser(
+        "reaction-split-pack",
+        help="Blank annotation pack for the general-reaction split (German xlsx). "
+        "No inference, no network, never loads .env.",
     )
-    review_parser.add_argument(
-        "--run", nargs=3, action="append", metavar=("NAME", "PREDICTIONS", "EXPECTED"),
-        help="A saved run (repeatable); defaults to the fold-0 option C prompt-2 run and the held-out folds 1-4 run.",
+    pack_parser.add_argument(
+        "--population-dir", default=str(DEFAULT_POPULATION_DIR),
+        help=f"Completed review run whose comments form the population (default: {DEFAULT_POPULATION_DIR}).",
     )
-    review_parser.add_argument("--reference", default=str(DEFAULT_REFERENCE_PATH),
-                               help=f"Reference dataset (default: {DEFAULT_REFERENCE_PATH}).")
-    review_parser.add_argument("--folds", default=str(DEFAULT_FOLDS_PATH),
-                               help=f"Persisted fold assignment (default: {DEFAULT_FOLDS_PATH}).")
-    review_parser.add_argument("--annotations", default=str(DEFAULT_ANNOTATIONS_DB),
-                               help=f"Annotation database, opened read-only (default: {DEFAULT_ANNOTATIONS_DB}).")
-    review_parser.add_argument("--source", action="append",
-                               help="Frozen extraction source parquet (repeatable); defaults to the two run sources.")
-    review_parser.add_argument("--role", choices=["primary", "secondary", "all"], default="primary")
-    review_parser.add_argument("--tiers", choices=["A", "A+B", "B"], default="A+B")
-    review_parser.add_argument(
+    pack_parser.add_argument(
+        "--extra-fold0-source", default=str(DEFAULT_EXTRA_SOURCE),
+        help=f"Frozen extraction source whose remaining fold-0 comments are added (default: {DEFAULT_EXTRA_SOURCE}).",
+    )
+    pack_parser.add_argument("--no-extra-fold0", action="store_true",
+                             help="Only the 2026-10-07 review population, without the extra fold-0 comments.")
+    pack_parser.add_argument("--folds", default=str(DEFAULT_FOLDS_PATH),
+                             help=f"Persisted fold assignment (default: {DEFAULT_FOLDS_PATH}).")
+    pack_parser.add_argument(
         "--output-dir", default=None,
-        help="New directory to create (default: dataset/experiments/general_approval_review_<created_utc>); "
+        help="New directory to create (default: dataset/experiments/reaction_split_pack_<created_utc>); "
         "must not exist.",
     )
-    review_parser.set_defaults(func=_run_general_approval_review)
+    pack_parser.set_defaults(func=_run_reaction_split_pack)
+
+    read_parser = subparsers.add_parser(
+        "reaction-split-read",
+        help="Read a filled general-reaction split pack and write its labels to a new versioned directory.",
+    )
+    read_parser.add_argument("--pack", required=True, help="The filled .xlsx pack (only read).")
+    read_parser.add_argument(
+        "--output-dir", default=None,
+        help="New directory to create (default: dataset/experiments/reaction_split_labels_<created_utc>); "
+        "must not exist.",
+    )
+    read_parser.set_defaults(func=_run_reaction_split_read)
 
     return parser
 

@@ -38,7 +38,8 @@ def rows(cp, index, status='accepted'):
     return [{**identity, 'status': status, 'proposed_stance': 'neutral' if status == 'accepted' else None,
         'final_stance': 'neutral' if status == 'accepted' else None,
         'basis': 'unaddressed' if status == 'accepted' else None, 'comment_evidence': [], 'source_evidence': [],
-        'explanation': '', 'review_reasons': [] if status == 'accepted' else ['test_reason']}
+        'explanation': '', 'review_reasons': [] if status == 'accepted' else ['test_reason'],
+        'general_reaction': None, 'general_reaction_polarity': None, 'reaction_evidence': [], 'rest_text': None}
         for identity in cp.identities[index]]
 
 
@@ -544,8 +545,10 @@ def test_real_revisable_outputs_commit_interrupt_resume(tmp_path, monkeypatch, v
 
 
 @pytest.mark.parametrize('status,bases', [
-    ('accepted', ['general_approval', 'explicit_target', 'explicit_exclusion', 'unaddressed', 'no_position']),
-    ('needs_review', ['general_approval', 'explicit_target', 'explicit_exclusion', 'unaddressed', 'no_position', 'unresolved', None]),
+    ('accepted', ['general_approval', 'general_rejection', 'explicit_target', 'explicit_exclusion', 'unaddressed',
+                  'no_position']),
+    ('needs_review', ['general_approval', 'general_rejection', 'explicit_target', 'explicit_exclusion', 'unaddressed',
+                      'no_position', 'unresolved', None]),
     ('failed', [None]),
 ])
 def test_row_contract_string_lists_and_empty_failure_reasons(tmp_path, status, bases):
@@ -575,6 +578,10 @@ def test_row_contract_string_lists_and_empty_failure_reasons(tmp_path, status, b
     {'status': 'failed', 'final_stance': None, 'proposed_stance': None},
     {'status': 'needs_review', 'final_stance': None, 'review_reasons': [None]},
     {'comment_evidence': [1]}, {'source_evidence': 'quote'}, {'explanation': None},
+    {'general_reaction': 'yes'}, {'general_reaction_polarity': 'positive'},
+    {'general_reaction': False, 'general_reaction_polarity': 'negative'},
+    {'general_reaction': True, 'general_reaction_polarity': 'neutral'},
+    {'reaction_evidence': None}, {'reaction_evidence': [1]}, {'rest_text': 1},
 ])
 @pytest.mark.parametrize('persisted', [False, True])
 def test_invalid_row_metadata_rejected_before_mutation_or_provider(tmp_path, monkeypatch, invalid, persisted):
