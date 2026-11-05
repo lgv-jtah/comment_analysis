@@ -271,11 +271,51 @@ def test_copy_votes_detects_tampering(snapshot_dir):
 # --------------------------------------------------------------------------
 
 
-def _run(tmp_path, pairs_path, model_paths, snapshot_dir, name="out"):
+def _synthetic_analysis_summary():
+    """A minimal frozen analysis summary shaped like the real pre-registered one.
+
+    Only the fields :func:`votes_stance_export.load_overall_summary` reads are
+    populated; the values are deliberately *not* the real ones so a test can
+    prove they are copied verbatim rather than recomputed.
+    """
+    return {
+        "interpretation_rules": "SYNTHETIC RULES: this is not the real text.",
+        "counts": {"n_comments": 9, "n_contributions_with_votes": 4},
+        "primary": {
+            "favor": 5,
+            "against": 2,
+            "neutral": 1,
+            "mixed": 1,
+            "favor_share": 71.4,
+            "vote_pro": 40,
+            "vote_contra": 10,
+            "vote_share": 80.0,
+            "difference_pp": -8.6,
+            "ci90": {"low": -15.0, "high": -2.0, "equivalent": False},
+        },
+    }
+
+
+@pytest.fixture
+def analysis_summary_path(tmp_path):
+    """A synthetic frozen analysis summary JSON written into tmp_path."""
+    path = tmp_path / "vote_ratio_analysis.summary.json"
+    write_json(path, _synthetic_analysis_summary())
+    return path
+
+
+def _run(tmp_path, pairs_path, model_paths, snapshot_dir, name="out",
+         analysis_summary_path=None):
+    # Keep run_export fully synthetic: if the caller gave no analysis summary,
+    # write a throwaway synthetic one so the real frozen file is never read.
+    if analysis_summary_path is None:
+        analysis_summary_path = tmp_path / f"{name}_analysis.summary.json"
+        write_json(analysis_summary_path, _synthetic_analysis_summary())
     return vse.run_export(
         pairs_path=pairs_path,
         model_paths=model_paths,
         votes_snapshot_dir=snapshot_dir,
+        analysis_summary_path=analysis_summary_path,
         output_dir=tmp_path / name,
     )
 
@@ -314,10 +354,17 @@ def test_run_export_hashes_written_last_and_verify(tmp_path, pairs_path, model_p
     assert recorded["complete"] is True
     # The hashes file records every other artifact, so re-loading the snapshot
     # it wrote verifies cleanly.
-    assert set(recorded["files"]) == {vse.COMMENTS_FILE, vse.VOTES_FILE, vse.SUMMARY_FILE}
+    assert set(recorded["files"]) == {
+        vse.COMMENTS_FILE,
+        vse.KEY_MESSAGES_FILE,
+        vse.VOTES_FILE,
+        vse.SUMMARY_FILE,
+    }
 
 
-def test_run_export_refuses_existing_directory(tmp_path, pairs_path, model_paths, snapshot_dir):
+def test_run_export_refuses_existing_directory(
+    tmp_path, pairs_path, model_paths, snapshot_dir, analysis_summary_path
+):
     target = tmp_path / "already"
     target.mkdir()
     with pytest.raises(FileExistsError):
@@ -325,5 +372,247 @@ def test_run_export_refuses_existing_directory(tmp_path, pairs_path, model_paths
             pairs_path=pairs_path,
             model_paths=model_paths,
             votes_snapshot_dir=snapshot_dir,
+            analysis_summary_path=analysis_summary_path,
             output_dir=target,
         )
+
+
+# --------------------------------------------------------------------------
+# build_key_messages_table
+# --------------------------------------------------------------------------
+
+
+def test_build_key_messages_table_one_row_per_pair(pairs_path):
+    table = vse.build_key_messages_table(pairs_path)
+    # One row per gold pair: the synthetic pairs frame has five pairs.
+    assert len(table) == 5
+    assert list(table.columns) == [
+        "contribution_id",
+        "key_message",
+        "comment_id",
+        "comment_text",
+        "reference_label",
+    ]
+    # Contribution ids are strings (joinable to votes and the comment set).
+    assert table.contribution_id.map(type).eq(str).all()
+    # comment_id matches the shared helper's derivation.
+    row = table[table.comment_text == "comment A"].iloc[0]
+    assert row.comment_id == comment_id_for("10", "comment A")
+    assert row.reference_label == "in_favor"
+
+
+def test_build_key_messages_table_counts_per_key_message(pairs_path):
+    table = vse.build_key_messages_table(pairs_path)
+    # Contribution 20 has two key messages (kmC1, kmC2, kmD) -> three gold pairs.
+    cid20 = table[table.contribution_id == "20"]
+    assert len(cid20) == 3
+    assert set(cid20.key_message) == {"kmC1", "kmC2", "kmD"}
+    # Distinct (contribution, key_message) pairs across the whole table.
+    distinct = table.drop_duplicates(["contribution_id", "key_message"])
+    assert len(distinct) == 5
+
+
+def test_build_key_messages_table_preserves_first_appearance_order(pairs_path):
+    table = vse.build_key_messages_table(pairs_path)
+    # The order mirrors pair_label_set (first-appearance order), so a key
+    # message's first row never appears after a later key message's first row.
+    first_seen = table.key_message.drop_duplicates().tolist()
+    assert first_seen == ["kmA", "kmB", "kmC1", "kmC2", "kmD"]
+
+
+def test_build_key_messages_table_thin_boundary(pairs_path):
+    # A key message backed by only two stance-bearing comments is "thin" (the
+    # backend will mark it too_few at <3); three is the first non-thin count.
+    # Here kmA is backed by a single pair, proving the per-pair grain the
+    # backend's 3-comment boundary is computed from is preserved faithfully.
+    table = vse.build_key_messages_table(pairs_path)
+    kmA = table[(table.contribution_id == "10") & (table.key_message == "kmA")]
+    assert len(kmA) == 1  # one stance-bearing comment behind kmA
+
+
+# --------------------------------------------------------------------------
+# load_overall_summary (pre-registered, copied verbatim)
+# --------------------------------------------------------------------------
+
+
+def test_load_overall_summary_is_verbatim(analysis_summary_path):
+    overall = vse.load_overall_summary(analysis_summary_path)
+    source = _synthetic_analysis_summary()
+    assert overall["pre_registered"] is True
+    # The primary block is copied verbatim, field for field.
+    assert overall["primary"] == source["primary"]
+    assert overall["n_comments"] == source["counts"]["n_comments"]
+    assert (
+        overall["n_contributions_with_votes"]
+        == source["counts"]["n_contributions_with_votes"]
+    )
+    assert overall["interpretation_rules"] == source["interpretation_rules"]
+    # no_clear_stance is neutral + mixed from the verbatim primary block.
+    assert overall["no_clear_stance"] == {"total": 2, "neutral": 1, "mixed": 1}
+
+
+def test_load_overall_summary_does_not_mutate_source(analysis_summary_path):
+    # Mutating the returned primary block must not change a second read.
+    first = vse.load_overall_summary(analysis_summary_path)
+    first["primary"]["favor"] = 999
+    second = vse.load_overall_summary(analysis_summary_path)
+    assert second["primary"]["favor"] == 5
+
+
+# --------------------------------------------------------------------------
+# compute_shared_contributions (exploratory, not pre-registered)
+# --------------------------------------------------------------------------
+
+
+def _shared_votes_frame():
+    """Votes for three contributions exercising each shared-set category.
+
+    - "10": has directional comments (A in_favor, B against) AND votes -> both.
+    - "20": has only non-directional comments (C mixed, D neutral) but votes ->
+      thumbs-side only.
+    - "30": has no row in the pairs frame but has votes -> thumbs-side only.
+    """
+    return pd.DataFrame(
+        {
+            "contribution_id": ["10", "20", "30"],
+            "votingPro": [7, 2, 5],
+            "votingContra": [3, 8, 5],
+        }
+    )
+
+
+def test_compute_shared_contributions_counts_and_flag(pairs_path):
+    votes = _shared_votes_frame()
+    shared = vse.compute_shared_contributions(pairs_path, votes)
+    assert shared["pre_registered"] is False
+    assert shared["note"] == vse.NOT_PRE_REGISTERED_NOTE
+    # All three contributions have votes; only "10" has a directional comment.
+    assert shared["thumbs_side_contributions"] == 3
+    assert shared["comment_side_contributions"] == 1
+    assert shared["both_sides_contributions"] == 1
+
+
+def test_compute_shared_contributions_pooled_point_estimate(pairs_path):
+    votes = _shared_votes_frame()
+    shared = vse.compute_shared_contributions(pairs_path, votes)
+    # Only "10" is on both sides: favour share = 1/2 = 50%, thumbs-up share =
+    # 7/10 = 70%, so the gap is -20 pp for both pooled and unweighted (one
+    # contribution, so pooling and averaging coincide).
+    assert shared["pooled"]["difference_pp"] == pytest.approx(-20.0)
+    assert shared["unweighted"]["difference_pp"] == pytest.approx(-20.0)
+    assert shared["bootstrap"] == {
+        "n": vse.SHARED_BOOTSTRAP_N,
+        "seed": vse.SHARED_BOOTSTRAP_SEED,
+    }
+
+
+# --------------------------------------------------------------------------
+# run_export: new artifacts and provenance
+# --------------------------------------------------------------------------
+
+
+def test_run_export_writes_key_messages_parquet(
+    tmp_path, pairs_path, model_paths, snapshot_dir
+):
+    result = _run(tmp_path, pairs_path, model_paths, snapshot_dir)
+    assert result.files["key_messages"].exists()
+    table = pd.read_parquet(result.files["key_messages"])
+    assert len(table) == 5
+    assert "reference_label" in table.columns
+    # Counts recorded in the summary match the parquet.
+    counts = result.summary["counts"]
+    assert counts["key_message_rows"] == 5
+    assert counts["key_messages"] == 5
+
+
+def test_run_export_hashes_list_key_messages_parquet(
+    tmp_path, pairs_path, model_paths, snapshot_dir
+):
+    result = _run(tmp_path, pairs_path, model_paths, snapshot_dir)
+    recorded = json.loads(result.files["hashes"].read_text(encoding="utf-8"))
+    assert vse.KEY_MESSAGES_FILE in recorded["files"]
+    assert set(recorded["files"]) == {
+        vse.COMMENTS_FILE,
+        vse.KEY_MESSAGES_FILE,
+        vse.VOTES_FILE,
+        vse.SUMMARY_FILE,
+    }
+
+
+def test_run_export_records_analysis_input_hash(
+    tmp_path, pairs_path, model_paths, snapshot_dir, analysis_summary_path
+):
+    result = _run(
+        tmp_path, pairs_path, model_paths, snapshot_dir,
+        analysis_summary_path=analysis_summary_path,
+    )
+    overall_input = result.summary["inputs"]["overall_analysis"]
+    assert overall_input["path"] == str(analysis_summary_path)
+    assert len(overall_input["sha256"]) == 64
+
+
+def test_run_export_embeds_overall_and_shared_blocks(
+    tmp_path, pairs_path, model_paths, snapshot_dir, analysis_summary_path
+):
+    result = _run(
+        tmp_path, pairs_path, model_paths, snapshot_dir,
+        analysis_summary_path=analysis_summary_path,
+    )
+    summary = result.summary
+    # Pre-registered headline is present and copied verbatim.
+    assert summary["overall_summary"]["pre_registered"] is True
+    assert summary["overall_summary"]["primary"]["favor"] == 5
+    # Exploratory shared-set block is present and flagged not pre-registered.
+    assert summary["shared_contributions"]["pre_registered"] is False
+    assert "thumbs_side_contributions" in summary["shared_contributions"]
+
+
+# --------------------------------------------------------------------------
+# Integration test on the REAL frozen inputs
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(
+    not (
+        vse.DEFAULT_PAIRS_PATH.exists()
+        and vse.DEFAULT_VOTES_SNAPSHOT_DIR.exists()
+        and vse.DEFAULT_ANALYSIS_SUMMARY_PATH.exists()
+    ),
+    reason="real frozen inputs not present in this checkout",
+)
+def test_real_inputs_reproduce_published_figures():
+    """The real frozen inputs must reproduce the published headline figures."""
+    votes, _, _ = vse.copy_votes(vse.DEFAULT_VOTES_SNAPSHOT_DIR)
+
+    # Key-message grain: 707 gold pairs, 320 distinct (contribution, key_message).
+    km = vse.build_key_messages_table(vse.DEFAULT_PAIRS_PATH)
+    assert len(km) == 707
+    assert km.drop_duplicates(["contribution_id", "key_message"]).shape[0] == 320
+
+    # Pre-registered headline, copied verbatim.
+    overall = vse.load_overall_summary(vse.DEFAULT_ANALYSIS_SUMMARY_PATH)
+    primary = overall["primary"]
+    assert (primary["favor"], primary["against"], primary["neutral"], primary["mixed"]) == (
+        130, 31, 74, 11,
+    )
+    assert round(primary["favor_share"], 3) == 80.745
+    assert round(primary["vote_share"], 3) == 88.940
+    assert round(primary["difference_pp"], 3) == -8.194
+    assert round(primary["ci90"]["low"], 3) == -14.642
+    assert round(primary["ci90"]["high"], 3) == -1.066
+    assert primary["ci90"]["equivalent"] is False
+    assert overall["n_comments"] == 246
+    assert overall["no_clear_stance"] == {"total": 85, "neutral": 74, "mixed": 11}
+    assert overall["n_contributions_with_votes"] == 107
+
+    # Exploratory shared-set figures, computed fresh and reproducible.
+    shared = vse.compute_shared_contributions(vse.DEFAULT_PAIRS_PATH, votes)
+    assert shared["thumbs_side_contributions"] == 107
+    assert shared["comment_side_contributions"] == 85
+    assert shared["both_sides_contributions"] == 80
+    assert round(shared["pooled"]["difference_pp"], 1) == -4.9
+    assert round(shared["pooled"]["ci90"]["low"], 1) == -11.5
+    assert round(shared["pooled"]["ci90"]["high"], 1) == 3.5
+    assert round(shared["unweighted"]["difference_pp"], 1) == -4.0
+    assert round(shared["unweighted"]["ci90"]["low"], 1) == -10.2
+    assert round(shared["unweighted"]["ci90"]["high"], 1) == 2.0
