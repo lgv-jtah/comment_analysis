@@ -7,6 +7,7 @@ directory (same spirit as test_vote_ratio_hypothesis.py). No real favor or
 vote ratio is ever computed here.
 """
 import json
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -357,6 +358,7 @@ def test_run_export_hashes_written_last_and_verify(tmp_path, pairs_path, model_p
     assert set(recorded["files"]) == {
         vse.COMMENTS_FILE,
         vse.KEY_MESSAGES_FILE,
+        vse.SPANS_FILE,
         vse.VOTES_FILE,
         vse.SUMMARY_FILE,
     }
@@ -534,6 +536,7 @@ def test_run_export_hashes_list_key_messages_parquet(
     assert set(recorded["files"]) == {
         vse.COMMENTS_FILE,
         vse.KEY_MESSAGES_FILE,
+        vse.SPANS_FILE,
         vse.VOTES_FILE,
         vse.SUMMARY_FILE,
     }
@@ -616,3 +619,289 @@ def test_real_inputs_reproduce_published_figures():
     assert round(shared["unweighted"]["difference_pp"], 1) == -4.0
     assert round(shared["unweighted"]["ci90"]["low"], 1) == -10.2
     assert round(shared["unweighted"]["ci90"]["high"], 1) == 2.0
+
+
+# --------------------------------------------------------------------------
+# Key-message source-sentence spans
+# --------------------------------------------------------------------------
+
+
+# A synthetic contribution text and the related sentences that resolve against it
+# by each method. Offsets are half-open code-point spans into CONTENT_10 / 20.
+CONTENT_10 = "Die Straße ist zu laut. Autos fahren hier zu schnell."
+CONTENT_20 = (
+    "Ich wünsche mir mehr Bäume. Das Parkhaus muss abgerissen werden. "
+    "Deshalb ist Tempo 30 wichtig. Auch Lärmschutz hilft."
+)
+
+
+def _extraction_frame():
+    """A synthetic mistral-nemo-shaped extraction frame for the gold pairs.
+
+    Columns mirror the real prediction parquet's span-relevant fields. The gold
+    pairs frame (``_pairs_frame``) uses contributions 10/20 and key messages
+    kmA/kmB/kmC1/kmC2/kmD; this gives each one a related sentence that resolves
+    by a specific method against CONTENT_10 / CONTENT_20:
+
+    * kmA  -> verbatim  ("Die Straße ist zu laut.")
+    * kmB  -> normalized (only case/whitespace differ)
+    * kmC1 -> verbatim  ("Ich wünsche mir mehr Bäume.")
+    * kmC2 -> fuzzy     (a one-letter typo: "abgerisen")
+    * kmD  -> unmatched (a sentence that does not occur)
+
+    Each key message is duplicated across two comment rows (as in the real file)
+    so the loader's dedup-per-(cid, km) is exercised.
+    """
+    rows = [
+        (10, "kmA", CONTENT_10, ["Die Straße ist zu laut."]),
+        (10, "kmB", CONTENT_10, ["AUTOS   fahren hier zu schnell."]),
+        (20, "kmC1", CONTENT_20, ["Ich wünsche mir mehr Bäume."]),
+        (20, "kmC2", CONTENT_20, ["Das Parkhaus muss abgerisen werden."]),
+        (20, "kmD", CONTENT_20, ["Ein Satz der hier gar nicht vorkommt."]),
+    ]
+    records = []
+    for cid, km, content, sentences in rows:
+        for _ in range(2):  # two comment rows per key message
+            records.append(
+                {
+                    "contribution_id": cid,
+                    "contributionContent": content,
+                    "key_message": km,
+                    "related_sentences": list(sentences),
+                    "related_sentence_spans": [None],
+                    # Extra columns the loader must ignore.
+                    "comment_text": "a comment",
+                    "stance": "neutral",
+                }
+            )
+    return pd.DataFrame(records)
+
+
+@pytest.fixture
+def extraction_path(tmp_path):
+    path = tmp_path / "mistral.parquet"
+    _extraction_frame().to_parquet(path, index=False)
+    return path
+
+
+# -- _normalize_text / _normalized_index --
+
+
+def test_normalize_text_collapses_and_lowers():
+    assert vse._normalize_text("  Die   STRASSE\nist\tlaut  ") == "die strasse ist laut"
+
+
+def test_normalized_index_maps_back_to_raw_offsets():
+    content = "Die  Straße   ist laut"
+    normalized, starts, ends = vse._normalized_index(content)
+    assert normalized == "die straße ist laut"
+    # Every raw offset is within the content and monotrack the source char.
+    assert starts[0] == 0 and ends[0] == 1
+    assert all(0 <= s < e <= len(content) for s, e in zip(starts, ends))
+
+
+# -- _segments --
+
+
+def test_segments_split_on_sentence_punctuation():
+    content = "Erster Satz. Zweiter! Dritter?"
+    segments = vse._segments(content)
+    texts = [content[s:e] for s, e in segments]
+    assert texts == ["Erster Satz.", "Zweiter!", "Dritter?"]
+
+
+def test_segments_trailing_unterminated_segment():
+    content = "Satz eins. Satz zwei ohne Punkt"
+    texts = [content[s:e] for s, e in vse._segments(content)]
+    assert texts == ["Satz eins.", "Satz zwei ohne Punkt"]
+
+
+# -- per-method span resolution --
+
+
+def test_verbatim_span_exact_match():
+    span, method = vse._resolve_sentence_span(CONTENT_10, "Die Straße ist zu laut.")
+    assert method == "verbatim"
+    assert CONTENT_10[span[0]:span[1]] == "Die Straße ist zu laut."
+
+
+def test_normalized_span_case_and_whitespace_only():
+    span, method = vse._resolve_sentence_span(CONTENT_10, "AUTOS   fahren hier zu schnell.")
+    assert method == "normalized"
+    assert CONTENT_10[span[0]:span[1]] == "Autos fahren hier zu schnell."
+
+
+def test_fuzzy_span_recovers_typo_sentence():
+    span, method = vse._resolve_sentence_span(
+        CONTENT_20, "Das Parkhaus muss abgerisen werden."
+    )
+    assert method == "fuzzy"
+    assert CONTENT_20[span[0]:span[1]] == "Das Parkhaus muss abgerissen werden."
+
+
+def test_fuzzy_span_spans_two_segments():
+    # A related sentence that runs across two of the text's own sentences (the
+    # Tempo-30 shape) is recovered by a multi-segment window.
+    content = "Deshalb ist Tempo 30 wichtig. Auch Lärmschutz hilft hier."
+    sentence = "Deshalb ist Tempo 30 wichtig und auch Lärmschutz hilft hier."
+    span, method = vse._resolve_sentence_span(content, sentence)
+    assert method == "fuzzy"
+    matched = content[span[0]:span[1]]
+    assert "Tempo 30" in matched and "Lärmschutz" in matched
+
+
+def test_unmatched_sentence_returns_none():
+    span, method = vse._resolve_sentence_span(CONTENT_20, "Ein Satz der hier gar nicht vorkommt.")
+    assert span is None
+    assert method == "unmatched"
+
+
+def test_fuzzy_span_below_threshold_is_unmatched():
+    # A sentence sharing only a couple of words must not be force-matched.
+    span, method = vse._resolve_sentence_span(CONTENT_10, "Völlig anderer Inhalt ueber Katzen und Hunde im Garten.")
+    assert span is None
+    assert method == "unmatched"
+
+
+# -- load_extraction_df --
+
+
+def test_load_extraction_df_dedups_per_key_message(extraction_path):
+    df = vse.load_extraction_df({vse.EXTRACTION_SPANS_MODEL: extraction_path})
+    # Two comment rows per (cid, km) collapse to one row each: 5 gold key messages.
+    assert len(df) == 5
+    assert df.contribution_id.map(type).eq(str).all()
+    assert set(df.columns) == {
+        "contribution_id",
+        "contributionContent",
+        "key_message",
+        "related_sentences",
+        "related_sentence_spans",
+    }
+
+
+def test_load_extraction_df_missing_model_returns_empty():
+    # No span-source model in the paths -> an empty (typed) frame, not an error.
+    df = vse.load_extraction_df({"base": Path("/nonexistent.parquet")})
+    assert df.empty
+    assert "contributionContent" in df.columns
+
+
+def test_load_extraction_df_missing_file_raises(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        vse.load_extraction_df({vse.EXTRACTION_SPANS_MODEL: tmp_path / "nope.parquet"})
+
+
+# -- build_key_message_spans_table --
+
+
+def test_build_key_message_spans_table_resolves_each_method(pairs_path, extraction_path):
+    key_messages = vse.build_key_messages_table(pairs_path)
+    extraction = vse.load_extraction_df({vse.EXTRACTION_SPANS_MODEL: extraction_path})
+    table = vse.build_key_message_spans_table(key_messages, extraction)
+    # One row per distinct (contribution, key message): five gold key messages.
+    assert len(table) == 5
+    by_km = {(r.contribution_id, r.key_message): r for r in table.itertuples(index=False)}
+    assert by_km[("10", "kmA")].methods == ["verbatim"]
+    assert by_km[("10", "kmB")].methods == ["normalized"]
+    assert by_km[("20", "kmC2")].methods == ["fuzzy"]
+    assert by_km[("20", "kmD")].methods == ["unmatched"]
+    # The unmatched key message has an empty span list and is counted as such.
+    kmd = by_km[("20", "kmD")]
+    assert list(kmd.spans) == []
+    assert kmd.unmatched == 1 and kmd.n_matched == 0
+    # Every recorded span is a valid half-open range inside its content.
+    assert all(r.extraction_model == vse.EXTRACTION_SPANS_MODEL for r in table.itertuples(index=False))
+
+
+def test_build_key_message_spans_table_span_points_at_right_text(pairs_path, extraction_path):
+    key_messages = vse.build_key_messages_table(pairs_path)
+    extraction = vse.load_extraction_df({vse.EXTRACTION_SPANS_MODEL: extraction_path})
+    table = vse.build_key_message_spans_table(key_messages, extraction)
+    kma = table[(table.contribution_id == "10") & (table.key_message == "kmA")].iloc[0]
+    s, e = kma.spans[0]
+    assert CONTENT_10[s:e] == "Die Straße ist zu laut."
+
+
+def test_build_key_message_spans_table_empty_extraction(pairs_path):
+    # With no extraction rows, every gold key message is covered but empty.
+    key_messages = vse.build_key_messages_table(pairs_path)
+    empty = vse.load_extraction_df({"base": Path("/nope.parquet")})
+    table = vse.build_key_message_spans_table(key_messages, empty)
+    assert len(table) == 5
+    assert all(len(list(r.spans)) == 0 for r in table.itertuples(index=False))
+    assert all(r.n_sentences == 0 for r in table.itertuples(index=False))
+
+
+# -- summarize_key_message_spans --
+
+
+def test_summarize_key_message_spans_counts(pairs_path, extraction_path):
+    key_messages = vse.build_key_messages_table(pairs_path)
+    extraction = vse.load_extraction_df({vse.EXTRACTION_SPANS_MODEL: extraction_path})
+    table = vse.build_key_message_spans_table(key_messages, extraction)
+    counts = vse.summarize_key_message_spans(table)
+    assert counts["extraction_model"] == vse.EXTRACTION_SPANS_MODEL
+    assert counts["key_messages"] == 5
+    assert counts["sentences_total"] == 5
+    assert counts["verbatim"] == 2
+    assert counts["normalized"] == 1
+    assert counts["fuzzy"] == 1
+    assert counts["unmatched"] == 1
+    # Four key messages fully located, one (kmD) with none.
+    assert counts["km_all"] == 4
+    assert counts["km_some"] == 0
+    assert counts["km_none"] == 1
+
+
+# -- run_export with spans --
+
+
+@pytest.fixture
+def model_paths_with_spans(tmp_path, model_paths):
+    """The base model_paths plus a span-source mistral-nemo extraction file."""
+    path = tmp_path / "mistral.parquet"
+    _extraction_frame().to_parquet(path, index=False)
+    return {**model_paths, vse.EXTRACTION_SPANS_MODEL: path}
+
+
+def test_run_export_writes_spans_parquet(
+    tmp_path, pairs_path, model_paths_with_spans, snapshot_dir
+):
+    result = _run(tmp_path, pairs_path, model_paths_with_spans, snapshot_dir)
+    assert result.files["key_message_spans"].exists()
+    table = pd.read_parquet(result.files["key_message_spans"])
+    assert len(table) == 5
+    # The summary carries the per-method span counts and the span-source model.
+    spans_counts = result.summary["counts"]["key_message_spans"]
+    assert spans_counts["extraction_model"] == vse.EXTRACTION_SPANS_MODEL
+    assert spans_counts["verbatim"] == 2
+    assert spans_counts["unmatched"] == 1
+
+
+def test_run_export_hashes_list_spans_parquet(
+    tmp_path, pairs_path, model_paths_with_spans, snapshot_dir
+):
+    result = _run(tmp_path, pairs_path, model_paths_with_spans, snapshot_dir)
+    recorded = json.loads(result.files["hashes"].read_text(encoding="utf-8"))
+    assert vse.SPANS_FILE in recorded["files"]
+    assert set(recorded["files"]) == {
+        vse.COMMENTS_FILE,
+        vse.KEY_MESSAGES_FILE,
+        vse.SPANS_FILE,
+        vse.VOTES_FILE,
+        vse.SUMMARY_FILE,
+    }
+
+
+def test_run_export_without_span_source_still_writes_empty_spans(
+    tmp_path, pairs_path, model_paths, snapshot_dir
+):
+    # The default synthetic model_paths has no mistral-nemo: the spans artifact is
+    # still written (every key message empty) and hash-covered.
+    result = _run(tmp_path, pairs_path, model_paths, snapshot_dir)
+    assert result.files["key_message_spans"].exists()
+    table = pd.read_parquet(result.files["key_message_spans"])
+    assert len(table) == 5
+    spans_counts = result.summary["counts"]["key_message_spans"]
+    assert spans_counts["km_none"] == 5

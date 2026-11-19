@@ -20,7 +20,9 @@ pre-registered vote-ratio equivalence test (see :data:`DESCRIPTIVE_ONLY_NOTE`).
 from __future__ import annotations
 
 import copy
+import difflib
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping
@@ -67,9 +69,32 @@ DEFAULT_ANALYSIS_SUMMARY_PATH = (
 EXPORT_DIR_PREFIX = "votes_stance_export_"
 COMMENTS_FILE = "votes_stance_comments.parquet"
 KEY_MESSAGES_FILE = "votes_stance_key_messages.parquet"
+SPANS_FILE = "votes_stance_key_message_spans.parquet"
 VOTES_FILE = "votes_snapshot.parquet"
 SUMMARY_FILE = "votes_stance_export.summary.json"
 SCHEMA_VERSION = "votes_stance_export_v1"
+
+# The model whose extracted related-sentence text locates each key message's
+# source passage inside the displayed contribution text. The backend pins the
+# displayed contribution_content to this same model's parquet, so spans computed
+# here line up with what the UI renders. Recorded in the artifact and summary.
+EXTRACTION_SPANS_MODEL = "mistral-nemo"
+
+# Fuzzy-match acceptance threshold for recovering a span whose sentence text does
+# not occur verbatim or normalised in the contribution (the extraction model
+# lightly rewrote it). A conservative floor: below it a window is treated as no
+# match rather than risk highlighting the wrong passage. Tuned on the gold set.
+FUZZY_SPAN_THRESHOLD = 0.82
+# A related sentence can span several of the contribution's own sentences (e.g.
+# "… sehr wichtig. Vielleicht auch …"), so the fuzzy matcher tries windows of up
+# to this many consecutive segments, not just one segment at a time.
+FUZZY_MAX_WINDOW = 3
+
+# The four per-sentence resolution outcomes, best (most trustworthy) first.
+METHOD_VERBATIM = "verbatim"
+METHOD_NORMALIZED = "normalized"
+METHOD_FUZZY = "fuzzy"
+METHOD_UNMATCHED = "unmatched"
 
 # The clustered-bootstrap settings for the *exploratory* shared-contributions
 # figures below. The seed is fixed so the published confidence range is exactly
@@ -381,6 +406,416 @@ def build_key_messages_table(pairs_path: Path) -> pd.DataFrame:
     ].reset_index(drop=True)
 
 
+# --------------------------------------------------------------------------
+# Key-message source-sentence spans (extraction-model provenance)
+# --------------------------------------------------------------------------
+
+
+def load_extraction_df(model_paths: Mapping[str, Path] | None = None) -> pd.DataFrame:
+    """Load the raw extraction frame used to locate key-message source spans.
+
+    Reads the span-source model's prediction parquet directly (not via
+    :func:`load_models`, which drops the text columns), keeping exactly the
+    fields the span resolver needs. The contribution id is stringified so it
+    joins to the gold key-message table, and rows are deduplicated per
+    (contribution, key message) because one key message appears once per comment
+    in the raw file but its related sentences and content are identical across
+    those rows.
+
+    Args:
+        model_paths: Model name -> prediction parquet. Defaults to
+            :data:`DEFAULT_MODELS`; the :data:`EXTRACTION_SPANS_MODEL` entry is
+            read.
+
+    Returns:
+        One row per (contribution_id, key_message) with ``contribution_id``
+        (str), ``contributionContent``, ``key_message``, ``related_sentences``
+        and ``related_sentence_spans``. An empty frame (with those columns) when
+        the span-source model is not among ``model_paths`` - a deliberate choice
+        to skip spans produces an empty span artifact rather than an error.
+
+    Raises:
+        FileNotFoundError: If the span-source model is listed but its file does
+            not exist.
+        ValueError: If that file is empty.
+    """
+    model_paths = dict(DEFAULT_MODELS if model_paths is None else model_paths)
+    columns = [
+        "contribution_id",
+        "contributionContent",
+        "key_message",
+        "related_sentences",
+        "related_sentence_spans",
+    ]
+    if EXTRACTION_SPANS_MODEL not in model_paths:
+        # Spans are intentionally skipped for this run; emit an empty frame so the
+        # artifact is still written (every key message then has no located span).
+        return pd.DataFrame({c: [] for c in columns})
+    path = Path(model_paths[EXTRACTION_SPANS_MODEL])
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Span-source model file for {EXTRACTION_SPANS_MODEL!r} not found: {path}"
+        )
+    df = pd.read_parquet(path)
+    if df.empty:
+        raise ValueError(f"Span-source model file is empty: {path}")
+    frame = df[columns].copy()
+    frame["contribution_id"] = frame["contribution_id"].astype(str)
+    # Identical across a key message's comment rows; keep the first occurrence so
+    # the span table has exactly one row per (contribution, key message).
+    return frame.drop_duplicates(["contribution_id", "key_message"]).reset_index(
+        drop=True
+    )
+
+
+def _normalize_text(text: str) -> str:
+    """Collapse all whitespace runs to single spaces, strip, and lower-case.
+
+    Lower-casing uses :meth:`str.lower` (not ``casefold``) because it is
+    length-preserving for the German text here, which keeps the character
+    offsets recoverable in :func:`_normalized_span`; ``casefold`` would expand
+    "ß" to "ss" and break the offset mapping.
+    """
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
+def _normalized_index(content: str) -> tuple[str, list[int], list[int]]:
+    """Build the normalised form of ``content`` with a map back to raw offsets.
+
+    Each character of the normalised string records the raw start and end offset
+    of the source character it came from, so a match found in the normalised
+    string can be mapped back to a half-open [start, end) span over the original
+    ``content`` (in code points).
+
+    Args:
+        content: The raw contribution text.
+
+    Returns:
+        A tuple ``(normalized, starts, ends)``. ``normalized`` is the
+        whitespace-collapsed, lower-cased text; ``starts[i]`` / ``ends[i]`` are
+        the raw offsets of the i-th normalised character.
+    """
+    norm_chars: list[str] = []
+    starts: list[int] = []
+    ends: list[int] = []
+    prev_space = False
+    for i, ch in enumerate(content):
+        if ch.isspace():
+            # Collapse any run of whitespace to a single space, and never emit a
+            # leading one (nothing accumulated yet).
+            if norm_chars and not prev_space:
+                norm_chars.append(" ")
+                starts.append(i)
+                ends.append(i + 1)
+                prev_space = True
+            continue
+        prev_space = False
+        for lowered in ch.lower():
+            # A character can lower-case to several (rare here); each maps back
+            # to the same single raw character.
+            norm_chars.append(lowered)
+            starts.append(i)
+            ends.append(i + 1)
+    # Drop a trailing collapsed space so the normalised string is fully trimmed.
+    while norm_chars and norm_chars[-1] == " ":
+        norm_chars.pop()
+        starts.pop()
+        ends.pop()
+    return "".join(norm_chars), starts, ends
+
+
+def _verbatim_span(content: str, sentence: str) -> list[int] | None:
+    """Return the first exact [start, end) occurrence of ``sentence``, or None."""
+    sentence = sentence.strip()
+    if not sentence:
+        return None
+    idx = content.find(sentence)
+    if idx < 0:
+        return None
+    return [idx, idx + len(sentence)]
+
+
+def _normalized_span(content: str, sentence: str) -> list[int] | None:
+    """Recover a span whose sentence matches ``content`` only after normalising.
+
+    Collapses whitespace and lower-cases both sides, finds the sentence in the
+    normalised content, maps the match back to raw offsets and round-trips the
+    recovered slice to be sure it still normalises to the target (guarding
+    against a mis-mapping). Returns None when there is no normalised match.
+    """
+    target = _normalize_text(sentence)
+    if not target:
+        return None
+    normalized, starts, ends = _normalized_index(content)
+    idx = normalized.find(target)
+    if idx < 0:
+        return None
+    start = starts[idx]
+    end = ends[idx + len(target) - 1]
+    # Round-trip: the raw slice must normalise back to the same target, or the
+    # offset mapping is untrustworthy and we decline the match.
+    if _normalize_text(content[start:end]) != target:
+        return None
+    return [start, end]
+
+
+def _segments(content: str) -> list[tuple[int, int]]:
+    """Split ``content`` into sentence-like segments as half-open raw spans.
+
+    A segment runs from the first non-space character to (and including) the next
+    run of sentence-terminal punctuation (``.!?``), or to the end of the text.
+    Trailing whitespace is excluded. Used only by :func:`_fuzzy_span`.
+    """
+    segments: list[tuple[int, int]] = []
+    n = len(content)
+    start: int | None = None
+    i = 0
+    while i < n:
+        if start is None:
+            if not content[i].isspace():
+                start = i
+            i += 1
+            continue
+        if content[i] in ".!?":
+            j = i + 1
+            while j < n and content[j] in ".!?":
+                j += 1
+            segments.append((start, j))
+            start = None
+            i = j
+        else:
+            i += 1
+    if start is not None:
+        # Trim trailing whitespace from the final, unterminated segment.
+        end = n
+        while end > start and content[end - 1].isspace():
+            end -= 1
+        segments.append((start, end))
+    return segments
+
+
+def _fuzzy_span(content: str, sentence: str) -> list[int] | None:
+    """Recover a span by fuzzy-matching the sentence to windows of segments.
+
+    The extraction model sometimes lightly rewrites a related sentence (fixing a
+    typo, merging clauses), so it occurs neither verbatim nor normalised in the
+    contribution. This slides a window of 1..:data:`FUZZY_MAX_WINDOW` consecutive
+    sentence segments across the text, scores each window against the target with
+    :class:`difflib.SequenceMatcher` on the normalised forms, and returns the
+    best window's raw span when its ratio clears
+    :data:`FUZZY_SPAN_THRESHOLD`. A related sentence that spans two of the
+    contribution's own sentences is why multi-segment windows are considered.
+
+    Returns None when no window clears the threshold.
+    """
+    target = _normalize_text(sentence)
+    if not target:
+        return None
+    segments = _segments(content)
+    matcher = difflib.SequenceMatcher(autojunk=False)
+    matcher.set_seq2(target)
+    best_ratio = 0.0
+    best_span: list[int] | None = None
+    for size in range(1, FUZZY_MAX_WINDOW + 1):
+        for first in range(0, len(segments) - size + 1):
+            start = segments[first][0]
+            end = segments[first + size - 1][1]
+            matcher.set_seq1(_normalize_text(content[start:end]))
+            ratio = matcher.ratio()
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_span = [start, end]
+    if best_span is not None and best_ratio >= FUZZY_SPAN_THRESHOLD:
+        return best_span
+    return None
+
+
+def _resolve_sentence_span(content: str, sentence: str) -> tuple[list[int] | None, str]:
+    """Resolve one related sentence to a raw [start, end) span and a method.
+
+    Tries, in order of trustworthiness: an exact (verbatim) match, a
+    whitespace/case-normalised match, then a conservative fuzzy match. Returns
+    ``(None, "unmatched")`` when none locate the sentence.
+
+    Args:
+        content: The raw contribution text.
+        sentence: One related-sentence string from the extraction model.
+
+    Returns:
+        A tuple ``(span, method)`` where ``method`` is one of
+        :data:`METHOD_VERBATIM`, :data:`METHOD_NORMALIZED`, :data:`METHOD_FUZZY`
+        or :data:`METHOD_UNMATCHED`.
+    """
+    span = _verbatim_span(content, sentence)
+    if span is not None:
+        return span, METHOD_VERBATIM
+    span = _normalized_span(content, sentence)
+    if span is not None:
+        return span, METHOD_NORMALIZED
+    span = _fuzzy_span(content, sentence)
+    if span is not None:
+        return span, METHOD_FUZZY
+    return None, METHOD_UNMATCHED
+
+
+def _iter_related_sentences(related_sentences: object) -> list[str]:
+    """Normalise the raw related_sentences cell to a list of non-empty strings.
+
+    The cell is a numpy array (or list) of strings, but can be missing or hold
+    non-string junk; this yields only the usable sentence strings.
+    """
+    if related_sentences is None:
+        return []
+    out: list[str] = []
+    for sentence in related_sentences:
+        if isinstance(sentence, str) and sentence.strip():
+            out.append(sentence)
+    return out
+
+
+def _resolve_key_message_spans(content: str, related_sentences: object) -> dict:
+    """Resolve all of one key message's related sentences to deduped spans.
+
+    Args:
+        content: The raw contribution text.
+        related_sentences: The raw related_sentences cell for the key message.
+
+    Returns:
+        A dict with ``spans`` (sorted, de-duplicated list of ``[start, end]``
+        int pairs), ``n_sentences`` (how many sentences were considered),
+        ``n_matched`` (how many resolved to a span), ``methods`` (the per-sentence
+        method, in sentence order) and ``unmatched`` (count of unmatched
+        sentences). All values are native Python types.
+    """
+    sentences = _iter_related_sentences(related_sentences)
+    methods: list[str] = []
+    span_set: set[tuple[int, int]] = set()
+    n_matched = 0
+    for sentence in sentences:
+        span, method = _resolve_sentence_span(content, sentence)
+        methods.append(method)
+        if span is not None:
+            n_matched += 1
+            span_set.add((int(span[0]), int(span[1])))
+    spans = [[s, e] for s, e in sorted(span_set)]
+    return {
+        "spans": spans,
+        "n_sentences": len(sentences),
+        "n_matched": n_matched,
+        "methods": methods,
+        "unmatched": len(sentences) - n_matched,
+    }
+
+
+def build_key_message_spans_table(
+    key_messages_table: pd.DataFrame, extraction_df: pd.DataFrame
+) -> pd.DataFrame:
+    """Build one span row per gold (contribution, key message).
+
+    For every distinct (contribution, key message) in the gold key-message table
+    (in its frozen first-appearance order), the matching extraction-model row is
+    located and its related sentences are resolved to character spans over the
+    contribution text. A gold key message with no extraction row (should not
+    happen for the pinned model, but handled defensively) gets an empty span
+    list and is counted as having no sentences.
+
+    Args:
+        key_messages_table: The gold key-message table from
+            :func:`build_key_messages_table` (contribution_id as str).
+        extraction_df: The raw extraction frame from :func:`load_extraction_df`.
+
+    Returns:
+        One row per (contribution_id, key_message) with ``contribution_id``
+        (str), ``key_message``, ``extraction_model``, ``spans`` (list of
+        ``[start, end]`` ints), ``n_sentences``, ``n_matched``, ``methods`` (list
+        of str) and ``unmatched`` (int). Native Python types throughout.
+    """
+    # Index the extraction rows by (cid, km) for O(1) lookup of content/sentences.
+    extraction = extraction_df.set_index(["contribution_id", "key_message"])
+    distinct = key_messages_table.drop_duplicates(
+        ["contribution_id", "key_message"]
+    )
+    records: list[dict] = []
+    for row in distinct.itertuples(index=False):
+        cid = str(row.contribution_id)
+        key_message = row.key_message
+        try:
+            source = extraction.loc[(cid, key_message)]
+        except KeyError:
+            # No extraction row: emit an empty, fully-unmatched record rather than
+            # dropping the key message, so the span table covers every gold KM.
+            records.append(
+                {
+                    "contribution_id": cid,
+                    "key_message": key_message,
+                    "extraction_model": EXTRACTION_SPANS_MODEL,
+                    "spans": [],
+                    "n_sentences": 0,
+                    "n_matched": 0,
+                    "methods": [],
+                    "unmatched": 0,
+                }
+            )
+            continue
+        content = source["contributionContent"]
+        resolved = _resolve_key_message_spans(content, source["related_sentences"])
+        records.append(
+            {
+                "contribution_id": cid,
+                "key_message": key_message,
+                "extraction_model": EXTRACTION_SPANS_MODEL,
+                **resolved,
+            }
+        )
+    return pd.DataFrame.from_records(records)
+
+
+def summarize_key_message_spans(spans_table: pd.DataFrame) -> dict:
+    """Aggregate the per-key-message span rows into summary counts.
+
+    Args:
+        spans_table: The table from :func:`build_key_message_spans_table`.
+
+    Returns:
+        A dict with ``extraction_model``, ``key_messages`` (row count),
+        ``sentences_total``, per-method sentence counts (``verbatim`` /
+        ``normalized`` / ``fuzzy`` / ``unmatched``) and the per-key-message
+        coverage split ``km_all`` / ``km_some`` / ``km_none`` (every sentence
+        matched / some but not all / none, with a key message that has no
+        sentences counted as ``km_none``).
+    """
+    method_counts = {
+        METHOD_VERBATIM: 0,
+        METHOD_NORMALIZED: 0,
+        METHOD_FUZZY: 0,
+        METHOD_UNMATCHED: 0,
+    }
+    sentences_total = 0
+    km_all = km_some = km_none = 0
+    for row in spans_table.itertuples(index=False):
+        for method in row.methods:
+            method_counts[method] += 1
+        sentences_total += row.n_sentences
+        if row.n_sentences == 0 or row.n_matched == 0:
+            km_none += 1
+        elif row.n_matched == row.n_sentences:
+            km_all += 1
+        else:
+            km_some += 1
+    return {
+        "extraction_model": EXTRACTION_SPANS_MODEL,
+        "key_messages": int(len(spans_table)),
+        "sentences_total": int(sentences_total),
+        "verbatim": method_counts[METHOD_VERBATIM],
+        "normalized": method_counts[METHOD_NORMALIZED],
+        "fuzzy": method_counts[METHOD_FUZZY],
+        "unmatched": method_counts[METHOD_UNMATCHED],
+        "km_all": km_all,
+        "km_some": km_some,
+        "km_none": km_none,
+    }
+
+
 def load_overall_summary(analysis_summary_path: Path) -> dict:
     """Load the PRE-REGISTERED overall headline figures, copied verbatim.
 
@@ -645,6 +1080,13 @@ def run_export(
     comments_table = build_comments_table(pairs_path, models)
     # Per-key-message gold labels for the per-key-message agreement view.
     key_messages_table = build_key_messages_table(pairs_path)
+    # Per-key-message source-sentence spans, located in the contribution text via
+    # the span-source model's extracted related sentences.
+    extraction_df = load_extraction_df(model_paths)
+    key_message_spans_table = build_key_message_spans_table(
+        key_messages_table, extraction_df
+    )
+    key_message_spans_counts = summarize_key_message_spans(key_message_spans_table)
     votes, snapshot_utc, snapshot_sha = copy_votes(votes_snapshot_dir)
 
     # Gold favor counts over the comment categories, reusing the pre-registered
@@ -703,6 +1145,10 @@ def run_export(
                 k: gold_favor[k]
                 for k in ("favor", "against", "neutral", "mixed")
             },
+            # Per-key-message span recovery: how many of each key message's
+            # source sentences were located in the contribution text, and by
+            # which method. Carries the span-source model's name for provenance.
+            "key_message_spans": key_message_spans_counts,
         },
         # The pre-registered headline and the exploratory shared-set figures.
         "overall_summary": overall_summary,
@@ -719,11 +1165,13 @@ def run_export(
     files = {
         "comments": output_dir / COMMENTS_FILE,
         "key_messages": output_dir / KEY_MESSAGES_FILE,
+        "key_message_spans": output_dir / SPANS_FILE,
         "votes": output_dir / VOTES_FILE,
         "summary": output_dir / SUMMARY_FILE,
     }
     comments_table.to_parquet(files["comments"], index=False)
     key_messages_table.to_parquet(files["key_messages"], index=False)
+    key_message_spans_table.to_parquet(files["key_message_spans"], index=False)
     votes.to_parquet(files["votes"], index=False)
     write_json(files["summary"], summary)
     # artifact_hashes.json is written LAST: it is the completion marker and
@@ -731,6 +1179,12 @@ def run_export(
     files["hashes"] = write_artifact_hashes(
         output_dir,
         created_utc,
-        [files["comments"], files["key_messages"], files["votes"], files["summary"]],
+        [
+            files["comments"],
+            files["key_messages"],
+            files["key_message_spans"],
+            files["votes"],
+            files["summary"],
+        ],
     )
     return vr.ArtifactRun(output_dir, files, summary)

@@ -21,6 +21,62 @@ existing per-comment table, vote snapshot and summary:
   In the frozen export this is 707 rows over 320 distinct (contribution, key
   message) pairs.
 
+- **`votes_stance_key_message_spans.parquet`** — one row per distinct
+  (`contribution_id`, `key_message`) in the gold key-message table, locating that
+  key message's source passage(s) inside the displayed contribution text so the
+  UI can highlight them. Built by `build_key_message_spans_table` from the
+  extraction model's related sentences (see "Provenance" below). Columns:
+  - `contribution_id` (str), `key_message` (str);
+  - `extraction_model` (str) — the model the offsets index into (`mistral-nemo`);
+  - `spans` — list of `[start, end]` half-open character offsets into the
+    contribution text (code points), sorted and de-duplicated; empty when no
+    source sentence could be located;
+  - `n_sentences` — how many related sentences the key message had;
+  - `n_matched` — how many resolved to a span;
+  - `methods` — per sentence, in sentence order, the resolution method used
+    (`verbatim` / `normalized` / `fuzzy` / `unmatched`);
+  - `unmatched` — count of sentences that resolved to nothing.
+  In the frozen export this is 320 rows (one per gold key message).
+
+### How a span is located, and provenance
+
+For each key message, every one of its related sentences (as extracted by the
+`mistral-nemo` model) is resolved to a character span over that model's
+`contributionContent` by trying three methods in order of trustworthiness, in
+`_resolve_sentence_span`:
+
+1. **verbatim** — the sentence occurs exactly in the text;
+2. **normalized** — it occurs after collapsing whitespace and lower-casing both
+   sides (lower-casing uses `str.lower`, **not** `casefold`, so it stays
+   length-preserving and the offsets remain recoverable);
+3. **fuzzy** — a `difflib.SequenceMatcher` ratio over windows of 1–3 consecutive
+   contribution sentences clears `FUZZY_SPAN_THRESHOLD` (0.82). Multi-segment
+   windows catch a related sentence that runs across two of the contribution's
+   own sentences; the conservative threshold means a weak match is left
+   `unmatched` rather than highlighting the wrong passage.
+
+**Provenance — these are extraction-model outputs, not hand labels.** The spans
+are recomputed here from the `mistral-nemo` extraction's `related_sentences`
+text, so they inherit that model's imprecision and can be wrong; they are *not*
+part of the pre-registered gold labelling. The offsets index into the
+`mistral-nemo` `contributionContent`, which is why the backend must keep
+`PARQUET_PATH` pinned to that same model (see the backend `README.md`).
+
+On the frozen export the recovery over 336 related sentences across the 320 key
+messages is: **289 verbatim, 11 normalized, 24 fuzzy, 12 unmatched**. A key
+message with no located span simply gets no highlight (the UI shows a "passage
+not found" note).
+
+### The `votes_stance_export_20261119T115612671036Z` run
+
+This run adds the spans artifact. Its other artifacts
+(`votes_stance_comments.parquet`, `votes_stance_key_messages.parquet`,
+`votes_snapshot.parquet`) are **byte-identical** to the previous frozen run
+`votes_stance_export_20261105T151906907735Z`; only `votes_stance_export.summary.json`
+changes, and only by gaining the `counts.key_message_spans` block (the per-method
+recovery counts above). The backend's `docker-compose.yml` points
+`VOTE_STANCE_EXPORT_DIR` at this newer run.
+
 The summary (`votes_stance_export.summary.json`) gains two blocks:
 
 - **`overall_summary`** — the headline thumbs-vs-comment-stance figures.
